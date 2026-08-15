@@ -172,9 +172,10 @@ def test_secrets_never_appear_in_any_finding(make_context):
         assert CREDS.passphrase not in rendered
 
 
-def test_404_reads_as_unregistered_account_not_a_dead_endpoint(make_context):
-    # Live observation 2026-08-15: valid creds + never-traded signer/funder
-    # combo → 404, while bad creds → 401. The two must not be conflated.
+def test_404_reads_as_identity_scoping_not_a_dead_endpoint(make_context):
+    # Live observation 2026-08-15 against a funded, traded funder: valid creds
+    # from an unrelated signer → 404, while bad creds → 401. The record is
+    # scoped to the key's identity, so the two must not be conflated.
     ctx = make_context(
         StubProbe({"/balance-allowance": http_error(404)}),
         credentials=CREDS,
@@ -188,5 +189,5 @@ def test_404_reads_as_unregistered_account_not_a_dead_endpoint(make_context):
     finding = CollateralBalance().run(ctx)
 
     assert finding.severity is Severity.WARN
-    assert "no balance record" in finding.summary
+    assert "key + funder" in finding.summary
     assert ctx.facts.get(Fact.COLLATERAL_BALANCE) is None

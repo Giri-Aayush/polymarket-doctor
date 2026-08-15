@@ -66,25 +66,26 @@ class CollateralBalance(Check):
             )
 
         if response.status == 404:
-            # Observed live 2026-08-15: valid credentials, deposit-wallet
-            # funder, and the endpoint answers 404 rather than a zero balance.
-            # Auth was accepted (unauthenticated requests get 401 here), so
-            # the miss is the account lookup: the CLOB has no balance record
-            # until this signer/funder combination has interacted with the
-            # exchange. Not documented anywhere; every SDK thread assumes the
-            # answer is a number.
+            # Observed live 2026-08-15 against a funded, actively-traded
+            # funder: valid credentials from an unrelated signer get 404, not
+            # the funder's balance and not 0. Auth was accepted (rejected
+            # credentials get 401 here), so the miss is scoping — the balance
+            # record belongs to the authenticated identity + funder pair, and
+            # one identity cannot read another's. The refusal is a 404 rather
+            # than a 403, so "not yours" and "doesn't exist" are the same
+            # status. Not documented anywhere; every SDK thread assumes a
+            # number comes back.
             self._record(ctx, None, None)
             return Finding.warn(
-                "the exchange has no balance record for this account yet",
+                "the exchange has no balance record for this key + funder pair",
                 detail=f"GET {BALANCE_PATH} returned 404 with authentication "
-                       "accepted — a 401 is what rejected credentials look "
-                       "like. The CLOB appears to create the balance record on "
-                       "first interaction, so a brand-new account reads as "
-                       "missing rather than zero.",
-                remedy="If this account has traded before, re-run with the "
-                       "funder and signature type the account actually uses. "
-                       "If it's new, this is expected until first deposit or "
-                       "trade.",
+                       "accepted — rejected credentials get 401. The record is "
+                       "scoped to the identity the API key is bound to: even a "
+                       "funded funder with trade history reads 404 under "
+                       "credentials derived from a different signer.",
+                remedy="Derive credentials with the wallet this account "
+                       "actually trades with, then re-run. For a brand-new "
+                       "account, expect this until first deposit or trade.",
                 status=response.status,
             )
 

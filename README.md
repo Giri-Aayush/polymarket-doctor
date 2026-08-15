@@ -234,6 +234,11 @@ Things verified against production on 2026-08-15 that cost time to discover:
   AsyncAPI spec's examples don't show
 - The unified SDK ships on PyPI as `polymarket-client` and imports as
   `polymarket`; the PyPI name `polymarket` belongs to an unrelated package
+- `/balance-allowance` is scoped to the API key's identity: a funded funder
+  with trade history returns **404** (not 403, not 0) under credentials derived
+  from a different signer, and rejected credentials return 401 — so 404 with
+  good credentials means "wrong identity for this funder," verified against a
+  live funded account
 - The relayer's `/deployed` only tracks wallets its own Safe factory deployed.
   Builder wallets are EIP-1967 beacon proxies with code on chain, and the
   relayer answers `deployed: false` for them — another reason the funder gets
