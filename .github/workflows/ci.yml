@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor. py-clob-client-v2 itself wants >=3.9, but the
+        # codebase uses match-free 3.10 syntax and nothing here needs to run on
+        # older than what a current trading host would have.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest --cov=polymarket_doctor --cov-report=term-missing
