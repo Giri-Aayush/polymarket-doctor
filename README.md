@@ -234,6 +234,10 @@ Things verified against production on 2026-08-15 that cost time to discover:
   AsyncAPI spec's examples don't show
 - The unified SDK ships on PyPI as `polymarket-client` and imports as
   `polymarket`; the PyPI name `polymarket` belongs to an unrelated package
+- The relayer's `/deployed` only tracks wallets its own Safe factory deployed.
+  Builder wallets are EIP-1967 beacon proxies with code on chain, and the
+  relayer answers `deployed: false` for them — another reason the funder gets
+  classified from chain state, not from the relayer
 
 ## Development
 

@@ -180,11 +180,21 @@ class AccountShape(Check):
         ctx.facts.set(Fact.DEPOSIT_WALLET_DEPLOYED, deployed)
 
         if not deployed:
-            ctx.facts.set(Fact.ACCOUNT_KIND, "EOA")
-            ctx.facts.set(Fact.SIGNATURE_TYPE, SignatureType.EOA)
-            return Finding.fail(
-                f"{_short(funder)} is an EOA, nothing deployed at that address",
-                remedy="Fund through a deposit wallet and pass it as --funder.",
+            # The relayer only tracks wallets its own Safe factory deployed.
+            # Beacon-proxy wallets (builder wallets, the newer deposit-wallet
+            # architecture) have code on chain and still answer false here —
+            # observed live 2026-08-15 — so without an RPC this stays a WARN,
+            # not a confident "you have no wallet".
+            ctx.facts.set(Fact.ACCOUNT_KIND, "no Safe-factory wallet; kind unknown")
+            ctx.facts.set(Fact.SIGNATURE_TYPE, None)
+            return Finding.warn(
+                f"the relayer knows no Safe-factory wallet at {_short(funder)}",
+                detail="That usually means a bare EOA, which V2 rejects with "
+                       "\"maker address not allowed\". But the relayer is blind "
+                       "to beacon-proxy wallets, which have code it never "
+                       "deployed, so this answer can't rule one out.",
+                remedy="Re-run with --rpc to classify the address from chain "
+                       "state instead.",
                 issue=issues.EOA_FLOW_REJECTED,
             )
 

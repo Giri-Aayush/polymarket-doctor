@@ -103,9 +103,18 @@ class TestAccountShapeWithoutChainAccess:
         assert ctx.facts.get(Fact.SIGNATURE_TYPE) is None
         assert "--rpc" in finding.remedy
 
-    def test_undeployed_funder_still_fails_cleanly(self, make_context):
+    def test_relayer_unknown_wallet_warns_rather_than_declaring_an_eoa(self, make_context):
+        # The relayer only tracks Safe-factory wallets. A beacon-proxy wallet
+        # has code the relayer never deployed and answers false here, so
+        # without an RPC "deployed: false" cannot support a confident EOA
+        # diagnosis — observed live with a builder wallet on 2026-08-15.
         ctx = self._context(make_context, ok({"deployed": False}), funder=EOA)
-        assert AccountShape().run(ctx).severity is Severity.FAIL
+
+        finding = AccountShape().run(ctx)
+
+        assert finding.severity is Severity.WARN
+        assert "--rpc" in finding.remedy
+        assert ctx.facts.get(Fact.SIGNATURE_TYPE) is None
 
     def test_relayer_error_is_a_failure(self, make_context):
         ctx = self._context(make_context, http_error(500))
