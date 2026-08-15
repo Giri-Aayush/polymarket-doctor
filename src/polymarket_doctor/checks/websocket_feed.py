@@ -79,7 +79,7 @@ class MarketFeed(Check):
         # leaks into a loop the host application might own.
         try:
             connect_ms, first_ms, raw = asyncio.run(self._subscribe_once(url, token_id))
-        except TimeoutError:
+        except asyncio.TimeoutError:  # noqa: UP041 - distinct from TimeoutError on 3.10
             # A recv timeout is handled inside the coroutine; only the
             # handshake timing out gets here.
             ctx.facts.set(Fact.WS_CONNECTED, False)
@@ -174,7 +174,7 @@ class MarketFeed(Check):
             subscribed = time.monotonic()
             try:
                 raw = await asyncio.wait_for(ws.recv(), self.first_message_timeout)
-            except TimeoutError:
+            except asyncio.TimeoutError:  # noqa: UP041 - distinct from TimeoutError on 3.10
                 return connect_ms, None, None
             return connect_ms, round((time.monotonic() - subscribed) * 1000, 1), raw
 
