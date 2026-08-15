@@ -16,14 +16,28 @@ from polymarket_doctor.core.facts import Fact
 
 @pytest.fixture
 def installed(monkeypatch):
-    """Pretend a given set of distributions is installed."""
+    """Pretend a set of distributions is installed and importable.
+
+    Keyed by distribution name, which is what the check looks up. For the
+    unified SDK that's `polymarket-client`, not the `polymarket` it imports as —
+    an unrelated package holds that name on PyPI.
+    """
     def _install(versions: dict[str, str]):
         def fake_version(name: str) -> str:
             try:
                 return versions[name]
             except KeyError:
                 raise metadata.PackageNotFoundError(name) from None
+
+        importable = {
+            module for module, distribution, _ in environment.KNOWN_SDKS
+            if distribution in versions
+        }
         monkeypatch.setattr(environment.metadata, "version", fake_version)
+        monkeypatch.setattr(
+            environment.importlib.util, "find_spec",
+            lambda module: object() if module in importable else None,
+        )
     return _install
 
 
@@ -61,7 +75,7 @@ def test_archived_v1_client_fails(make_context, installed):
 
 
 def test_unified_sdk_is_preferred_when_several_are_present(make_context, installed):
-    installed({"polymarket": "0.3.0", "py-clob-client-v2": "1.1.0"})
+    installed({"polymarket-client": "0.6.0", "py-clob-client-v2": "1.1.0"})
     ctx = make_context(StubProbe())
 
     finding = SdkGeneration().run(ctx)
@@ -82,3 +96,12 @@ def test_v1_alongside_v2_still_fails_on_v1(make_context, installed):
 
     assert finding.severity is Severity.WARN
     assert "py-clob-client" in finding.detail
+
+
+def test_the_unrelated_pypi_polymarket_package_is_not_mistaken_for_the_sdk(installed):
+    # `polymarket` on PyPI is a third-party odds exporter. The official client
+    # ships as `polymarket-client` and merely imports as `polymarket`, so
+    # deriving the distribution name from the import name finds the wrong thing.
+    distributions = {distribution for _, distribution, _ in environment.KNOWN_SDKS}
+    assert "polymarket" not in distributions
+    assert "polymarket-client" in distributions

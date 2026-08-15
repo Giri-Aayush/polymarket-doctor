@@ -90,3 +90,12 @@ class TestTerminalRender:
         assert "py-clob-client-v2#70" in output
         # A clean-looking run must not read as clearance to trade.
         assert "not a green light" in output
+
+
+def test_unknown_check_id_suggests_the_closest_real_one(capsys):
+    exit_code = main(["check", "auth.key_identity", "--address", "0x" + "1" * 40, "--no-rpc"])
+    err = capsys.readouterr().err
+
+    assert exit_code == 2
+    assert "auth.key-identity" in err       # the suggestion
+    assert "Traceback" not in err

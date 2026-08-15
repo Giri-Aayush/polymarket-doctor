@@ -83,7 +83,7 @@ SIGNATURE_TYPE_MISMATCH = KnownIssue(
           "POLY_1271 deposit wallet shape",
     opened=date(2026, 5, 28),
     closed=date(2026, 6, 2),
-    comments=6,
+    comments=8,
     workaround="Polymarket's reply: L1/L2 identity (the signer) is meant to "
                "differ from order identity (the funder). A funder deployed by "
                "the UI for an external wallet is a Gnosis Safe and needs "
@@ -96,7 +96,7 @@ EOA_FLOW_REJECTED = KnownIssue(
     title="EOA basic flow rejected: 'maker address not allowed, please use the "
           "deposit wallet flow'",
     opened=date(2026, 5, 8),
-    comments=3,
+    comments=2,
     workaround="V2 stopped accepting EOA-funded orders after the 2026-04-28 "
                "cutover. Fund through a deposit wallet.",
 )
@@ -163,7 +163,7 @@ WEBSOCKET_STREAM_STOPS = KnownIssue(
     repo="real-time-data-client",
     number=26,
     title="WebSocket data stream stops after some time",
-    opened=date(2026, 1, 17),
+    opened=date(2025, 12, 4),
     comments=18,
 )
 

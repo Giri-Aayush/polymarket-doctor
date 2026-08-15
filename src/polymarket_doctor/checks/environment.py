@@ -7,6 +7,7 @@ every later stage would fail too, for reasons that look nothing like the cause.
 from __future__ import annotations
 
 import importlib.metadata as metadata
+import importlib.util
 import time
 
 from .. import issues
@@ -23,12 +24,17 @@ from ..net import endpoints
 SKEW_WARN_SECONDS = 5
 SKEW_FAIL_SECONDS = 30
 
-# Order of preference. First one installed is what the partner is most likely
+# (import name, distribution name, label). These differ for the unified SDK: it
+# imports as `polymarket` but ships as `polymarket-client`, and there is an
+# unrelated third-party package actually called `polymarket` on PyPI. Deriving
+# one name from the other misidentifies that package as Polymarket's.
+#
+# Order is preference. First one installed is what the partner is most likely
 # running; v1 is last because it's archived and can't sign V2 orders at all.
 KNOWN_SDKS = (
-    ("polymarket", "py-sdk (unified)"),
-    ("py_clob_client_v2", "py-clob-client-v2"),
-    ("py_clob_client", "py-clob-client (v1, archived)"),
+    ("polymarket", "polymarket-client", "polymarket-client (unified)"),
+    ("py_clob_client_v2", "py-clob-client-v2", "py-clob-client-v2"),
+    ("py_clob_client", "py-clob-client", "py-clob-client (v1, archived)"),
 )
 
 
@@ -228,12 +234,18 @@ class SdkGeneration(Check):
 
 
 def _installed_sdks() -> list[tuple[str, str, str]]:
+    """Installed Polymarket SDKs as (import name, label, version)."""
     found = []
-    for module, label in KNOWN_SDKS:
+    for module, distribution, label in KNOWN_SDKS:
         try:
-            found.append((module, label, metadata.version(module.replace("_", "-"))))
+            version = metadata.version(distribution)
         except metadata.PackageNotFoundError:
             continue
+        # The distribution can be present without its module importable (a
+        # broken install, or a name collision). Only count it if both hold.
+        if importlib.util.find_spec(module) is None:
+            continue
+        found.append((module, label, version))
     return found
 
 

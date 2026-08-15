@@ -8,6 +8,7 @@ help text says so.
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import sys
 from collections.abc import Sequence
@@ -122,6 +123,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     endpoints = Endpoints(clob=args.host) if args.host else Endpoints()
     registry = default_registry()
+
+    if args.command == "check":
+        known = sorted(check.id for check in registry)
+        if args.check_id not in known:
+            # A typo'd id shouldn't produce a traceback. Suggest the closest
+            # real one, since 'auth.key_identity' for 'auth.key-identity' is
+            # the likely shape of the mistake.
+            closest = difflib.get_close_matches(args.check_id, known, n=1)
+            hint = f" Did you mean {closest[0]}?" if closest else ""
+            print(f"no such check: {args.check_id}.{hint}", file=sys.stderr)
+            print(f"known checks: {', '.join(known)}", file=sys.stderr)
+            return 2
 
     with HttpxProbe(timeout=args.timeout) as probe:
         ctx = Context(
