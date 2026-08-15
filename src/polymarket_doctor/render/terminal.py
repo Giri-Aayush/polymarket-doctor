@@ -57,6 +57,12 @@ class TerminalReport:
             self._line(outcome)
             if outcome.severity in (Severity.FAIL, Severity.WARN):
                 self._explain(outcome)
+            elif outcome.finding.detail:
+                # Passing checks get a dim note rather than a panel, so a clean
+                # run still reads as a list.
+                self._console.print(
+                    Padding(Text(outcome.finding.detail, style="bright_black"), (0, 0, 1, 6))
+                )
         self._console.print()
 
     def _line(self, outcome: Outcome) -> None:

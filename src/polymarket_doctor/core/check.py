@@ -63,8 +63,10 @@ class Finding:
     evidence: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def ok(cls, summary: str, **evidence: Any) -> Finding:
-        return cls(Severity.PASS, summary, evidence=evidence)
+    def ok(cls, summary: str, detail: str | None = None, **evidence: Any) -> Finding:
+        # A passing check sometimes has the most useful thing to say — stage 1
+        # naming the signature type you'd otherwise have guessed wrong, for one.
+        return cls(Severity.PASS, summary, detail, evidence=evidence)
 
     @classmethod
     def warn(cls, summary: str, detail: str | None = None, remedy: str | None = None,

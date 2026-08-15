@@ -67,26 +67,31 @@ def test_key_bound_to_the_order_signer_passes(make_context):
     assert ctx.facts.get(Fact.API_KEY_IDENTITY) == EOA
 
 
-def test_key_bound_to_the_eoa_while_orders_name_the_deposit_wallet(make_context):
-    # The exact shape of #70. Auth works, so nothing upstream looks wrong.
+def test_key_on_the_eoa_with_a_separate_funder_is_the_intended_shape(make_context):
+    # The whole #70 cluster reads this as the bug. Polymarket's answer on
+    # ts-sdk#73 is that it's the documented model: L1 auth identifies the
+    # signer, orders execute from the funder. Reporting it as a failure sends
+    # people off changing SDKs when their signature type is the actual problem.
     probe = OnlyAuthenticatesAs(EOA)
     ctx = build_context(make_context, probe, signer=EOA, funder=DEPOSIT_WALLET)
 
     finding = KeyIdentity().run(ctx)
 
-    assert finding.severity is Severity.FAIL
-    assert finding.issue is issues.SIGNER_IDENTITY_MISMATCH
+    assert finding.severity is Severity.PASS
     assert finding.evidence["api_key_identity"] == EOA
-    assert finding.evidence["order_signer"] == DEPOSIT_WALLET
-    assert "can never match" in finding.detail
+    assert finding.evidence["order_funder"] == DEPOSIT_WALLET
 
 
-def test_key_bound_to_the_deposit_wallet_passes(make_context):
-    # The working configuration, reached today only via rs-clob-client-v2.
+def test_key_minted_against_the_funder_is_the_inverse_and_only_warns(make_context):
+    # Backwards from the documented shape, but we don't know that the exchange
+    # rejects it, so it doesn't get to block the run.
     probe = OnlyAuthenticatesAs(DEPOSIT_WALLET)
     ctx = build_context(make_context, probe, signer=EOA, funder=DEPOSIT_WALLET)
 
-    assert KeyIdentity().run(ctx).severity is Severity.PASS
+    finding = KeyIdentity().run(ctx)
+
+    assert finding.severity is Severity.WARN
+    assert finding.issue is issues.SIGNATURE_TYPE_MISMATCH
 
 
 def test_both_candidates_are_tried_before_giving_up(make_context):

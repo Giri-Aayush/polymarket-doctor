@@ -1,12 +1,24 @@
-"""Stage 1 — which account is this, and can the installed SDK sign for it?
+"""Stage 1 — which account is this, and which signature type does it need?
 
-The V2 exchange wants orders from a deployed deposit wallet, signed with
-Poly1271 and ERC-7739 nested TypedDataSign. The Python and TypeScript clients
-don't emit that wrapping, so auth succeeds and every order is rejected. That one
-mismatch accounts for 49 of the open issues across the v2 clients, and it is
-undebuggable from the error text alone.
+This is where the biggest open cluster gets resolved, and the resolution is not
+what the issue threads say it is.
 
-This stage answers it before a partner writes any trading code.
+The threads (py-clob-client-v2#70 and ~15 duplicates) conclude that the SDKs
+can't sign for deposit wallets and that only the Rust client works. Polymarket's
+own answer on ts-sdk#73 is different: an API key authenticating the EOA while
+orders execute from the funder is the intended model, and the reported failures
+were accounts using signature_type=3 (POLY_1271) on a funder that is actually an
+older Gnosis Safe and needs signature_type=2.
+
+Checked on chain, that holds. Both the funder in #70 and the one Polymarket
+identified in #73 are Gnosis Safe v1.3.0 proxies owned by the reporting EOA,
+with byte-identical proxy code and the same implementation. So the fix for most
+people is a different signature_type, not a different SDK.
+
+Nothing in the Polymarket API exposes which kind a funder is. `GET /deployed`
+answers the same for `type=SAFE` and `type=WALLET`. The only reliable
+discriminator is asking the contract whether it implements the Safe interface,
+which is what this stage does.
 """
 
 from __future__ import annotations
@@ -31,22 +43,7 @@ class SignatureType(IntEnum):
 
     @property
     def label(self) -> str:
-        return {
-            SignatureType.EOA: "EOA",
-            SignatureType.POLY_PROXY: "POLY_PROXY",
-            SignatureType.POLY_GNOSIS_SAFE: "POLY_GNOSIS_SAFE",
-            SignatureType.POLY_1271: "POLY_1271",
-        }[self]
-
-
-class AccountKind(str):
-    """Free-form on purpose — this is a label for humans, not a branch key."""
-
-
-# Clients that can produce the ERC-7739 nested signature a deposit wallet's
-# isValidSignature accepts. Verified against the evidence matrix in
-# py-clob-client-v2#111: Rust places orders on this flow, Python and TS don't.
-SDKS_WITH_ERC7739 = frozenset({"rs_clob_client_v2"})
+        return f"{self.name} ({self.value})"
 
 
 class Addresses(Check):
@@ -69,8 +66,6 @@ class Addresses(Check):
                 remedy="Expected 0x followed by 40 hex characters.",
             )
 
-        # No explicit funder means self-funded: the signer pays. That's the EOA
-        # shape, and stage 1's next check is where it gets ruled out for V2.
         funder_input = ctx.funder_address or ctx.signer_address
         funder = _checksum(funder_input)
         if funder is None:
@@ -85,101 +80,173 @@ class Addresses(Check):
         if signer == funder:
             return Finding.ok(f"signer and funder are both {_short(signer)}",
                               signer=signer, funder=funder)
-        return Finding.ok(
-            f"signer {_short(signer)} funding {_short(funder)}",
-            signer=signer,
-            funder=funder,
-        )
+        return Finding.ok(f"signer {_short(signer)} funding {_short(funder)}",
+                          signer=signer, funder=funder)
 
 
 class AccountShape(Check):
-    """Classify the funder and pick the signature type the exchange expects."""
+    """Classify the funder on chain and name the signature type it needs."""
 
     id = "identity.account-kind"
     stage = Stage.IDENTITY
-    title = "Account type and required signature scheme"
-    reads = frozenset({Fact.SIGNER_ADDRESS, Fact.FUNDER_ADDRESS, Fact.SDK})
+    title = "Funder type and required signature scheme"
+    reads = frozenset({Fact.SIGNER_ADDRESS, Fact.FUNDER_ADDRESS})
     writes = frozenset({
         Fact.ACCOUNT_KIND,
         Fact.SIGNATURE_TYPE,
         Fact.DEPOSIT_WALLET_DEPLOYED,
+        Fact.FUNDER_PROFILE,
     })
 
     def run(self, ctx: Context) -> Finding:
-        signer = ctx.facts.get(Fact.SIGNER_ADDRESS)
         funder = ctx.facts.get(Fact.FUNDER_ADDRESS)
 
-        deployed = self._is_deployed(ctx, funder)
-        if deployed is None:
+        if ctx.chain is None:
+            return self._without_chain_access(ctx, funder)
+
+        profile = ctx.chain.profile(funder)
+        if profile is None:
             return Finding.fail(
-                "relayer would not say whether the funder is deployed",
-                detail=f"GET {ctx.endpoints.relayer}/deployed did not return a "
-                       f"usable answer for {funder}.",
-                remedy="Re-run; if it persists the relayer is down and stage 2 "
-                       "can't be trusted either.",
+                "could not read the funder from chain",
+                detail="The RPC did not answer eth_getCode. Without it there's "
+                       "no way to tell a Gnosis Safe from a deposit wallet, and "
+                       "that determines your signature type.",
+                remedy="Pass --rpc with a Polygon endpoint you trust.",
             )
 
-        ctx.facts.set(Fact.DEPOSIT_WALLET_DEPLOYED, deployed)
+        ctx.facts.set(Fact.FUNDER_PROFILE, profile)
+        ctx.facts.set(Fact.DEPOSIT_WALLET_DEPLOYED, profile.has_code)
 
-        if not deployed:
-            # Nothing at that address, so the funder is a bare EOA. V2 stopped
-            # accepting those after the 2026-04-28 cutover.
+        if not profile.has_code:
             ctx.facts.set(Fact.ACCOUNT_KIND, "EOA")
             ctx.facts.set(Fact.SIGNATURE_TYPE, SignatureType.EOA)
             return Finding.fail(
-                f"{_short(funder)} is an EOA with no deposit wallet deployed",
-                detail="The V2 exchange rejects EOA-funded orders with "
-                       "\"maker address not allowed, please use the deposit "
-                       "wallet flow\". Authentication still succeeds, which is "
-                       "why this reads as a signing bug.",
-                remedy="Deploy a deposit wallet, fund it, and pass it as "
-                       "--funder.",
-                issue=issues.DEPOSIT_WALLET_REQUIRED,
+                f"{_short(funder)} is an EOA, nothing deployed at that address",
+                detail="V2 rejects EOA-funded orders with \"maker address not "
+                       "allowed, please use the deposit wallet flow\". "
+                       "Authentication still succeeds, which is why this reads "
+                       "as a signing problem.",
+                remedy="Fund through a deposit wallet and pass it as --funder.",
+                issue=issues.EOA_FLOW_REJECTED,
                 funder=funder,
-                deployed=False,
+            )
+
+        if profile.is_gnosis_safe:
+            ctx.facts.set(Fact.ACCOUNT_KIND, f"Gnosis Safe {profile.safe_version}")
+            ctx.facts.set(Fact.SIGNATURE_TYPE, SignatureType.POLY_GNOSIS_SAFE)
+            return Finding.ok(
+                f"funder is a Gnosis Safe {profile.safe_version}, "
+                f"use signature_type={SignatureType.POLY_GNOSIS_SAFE.value}",
+                detail="The UI deploys this kind when the account was created "
+                       "with an external wallet rather than email or Google. "
+                       "Signing it as POLY_1271 (3) is the most common cause of "
+                       "\"the order signer address has to be the address of the "
+                       "API KEY\".",
+                funder=funder,
+                safe_version=profile.safe_version,
+                signature_type=SignatureType.POLY_GNOSIS_SAFE.value,
             )
 
         ctx.facts.set(Fact.ACCOUNT_KIND, "deposit wallet")
         ctx.facts.set(Fact.SIGNATURE_TYPE, SignatureType.POLY_1271)
-
-        sdk = ctx.facts.get(Fact.SDK) or {}
-        module = sdk.get("module")
-        if module and module not in SDKS_WITH_ERC7739:
-            return Finding.fail(
-                f"{sdk.get('label', module)} cannot sign for a deposit wallet",
-                detail="Orders from a deposit wallet need Poly1271 with ERC-7739 "
-                       "nested TypedDataSign, which its on-chain isValidSignature "
-                       "verifies. This client doesn't emit that wrapping, so "
-                       "/auth passes and POST /order is rejected every time.",
-                remedy=issues.SIGNER_IDENTITY_MISMATCH.workaround,
-                issue=issues.SIGNER_IDENTITY_MISMATCH,
-                funder=funder,
-                signature_type=SignatureType.POLY_1271.label,
-            )
-
         return Finding.ok(
-            f"deposit wallet {_short(funder)} deployed, signing as "
-            f"{SignatureType.POLY_1271.label}",
-            signer=signer,
+            f"funder is a deposit wallet, use "
+            f"signature_type={SignatureType.POLY_1271.value}",
+            detail="It has code but doesn't implement the Safe interface, so "
+                   "it's the newer deposit-wallet contract.",
             funder=funder,
-            signature_type=SignatureType.POLY_1271.label,
+            signature_type=SignatureType.POLY_1271.value,
         )
 
     @staticmethod
-    def _is_deployed(ctx: Context, address: str) -> bool | None:
-        """Ask the relayer. type=SAFE is the default and covers deposit wallets.
+    def _without_chain_access(ctx: Context, funder: str) -> Finding:
+        """Fall back to the relayer, which can only say deployed or not.
 
-        The endpoint accepts unknown `type` values without complaint, so don't
-        read anything into a response for a type you made up.
+        Worth doing rather than failing outright: knowing the funder has no
+        contract at all is still the answer for a lot of people.
         """
         response = ctx.probe.get(
             ctx.endpoints.relayer_url("/deployed"),
-            params={"address": address, "type": "SAFE"},
+            params={"address": funder, "type": "SAFE"},
         )
-        if not response.ok or not isinstance(response.body, dict):
-            return None
-        deployed = response.body.get("deployed")
-        return deployed if isinstance(deployed, bool) else None
+        deployed = response.body.get("deployed") if isinstance(response.body, dict) else None
+        if not isinstance(deployed, bool):
+            return Finding.fail(
+                "could not determine the funder type",
+                detail="No RPC configured and the relayer did not answer.",
+            )
+
+        ctx.facts.set(Fact.FUNDER_PROFILE, None)
+        ctx.facts.set(Fact.DEPOSIT_WALLET_DEPLOYED, deployed)
+
+        if not deployed:
+            ctx.facts.set(Fact.ACCOUNT_KIND, "EOA")
+            ctx.facts.set(Fact.SIGNATURE_TYPE, SignatureType.EOA)
+            return Finding.fail(
+                f"{_short(funder)} is an EOA, nothing deployed at that address",
+                remedy="Fund through a deposit wallet and pass it as --funder.",
+                issue=issues.EOA_FLOW_REJECTED,
+            )
+
+        ctx.facts.set(Fact.ACCOUNT_KIND, "contract wallet, kind unknown")
+        ctx.facts.set(Fact.SIGNATURE_TYPE, None)
+        return Finding.warn(
+            "funder is a contract wallet but its kind is unknown",
+            detail="The relayer answers the same for a Gnosis Safe and a "
+                   "deposit wallet, and they need different signature types. "
+                   "Telling them apart needs an eth_call.",
+            remedy="Re-run with --rpc so this resolves to a signature type.",
+            issue=issues.SIGNATURE_TYPE_MISMATCH,
+        )
+
+
+class SignerAuthority(Check):
+    """Can the signer actually authorize for the funder?
+
+    A Safe only accepts signatures from its owners. If the key you're signing
+    with isn't one, no amount of fixing the signature type will help, and the
+    rejection looks identical to every other signature failure.
+    """
+
+    id = "identity.signer-authority"
+    stage = Stage.IDENTITY
+    title = "Signer is authorized for the funder"
+    reads = frozenset({Fact.SIGNER_ADDRESS, Fact.FUNDER_ADDRESS, Fact.FUNDER_PROFILE})
+
+    def run(self, ctx: Context) -> Finding:
+        signer = ctx.facts.get(Fact.SIGNER_ADDRESS)
+        funder = ctx.facts.get(Fact.FUNDER_ADDRESS)
+        profile = ctx.facts.get(Fact.FUNDER_PROFILE)
+
+        if signer == funder:
+            return Finding.ok("signer funds itself, nothing to authorize")
+
+        if profile is None or not profile.is_gnosis_safe:
+            return Finding.ok("no owner set to check for this funder type")
+
+        if not profile.owners:
+            return Finding.warn(
+                "funder is a Safe but returned no owners",
+                detail="getOwners() came back empty, which shouldn't happen for "
+                       "a deployed Safe. Treat the signature-type advice above "
+                       "as unconfirmed.",
+            )
+
+        if profile.is_owner(signer):
+            return Finding.ok(
+                f"{_short(signer)} is an owner of the Safe",
+                owners=list(profile.owners),
+            )
+
+        return Finding.fail(
+            f"{_short(signer)} is not an owner of {_short(funder)}",
+            detail="The Safe only honours signatures from its owners, so orders "
+                   "signed with this key are rejected no matter which signature "
+                   "type you send.",
+            remedy=f"Sign with one of: {', '.join(profile.owners)}",
+            signer=signer,
+            owners=list(profile.owners),
+        )
 
 
 def _checksum(address: str) -> str | None:
@@ -193,4 +260,4 @@ def _short(address: str) -> str:
     return f"{address[:6]}…{address[-4:]}"
 
 
-CHECKS = (Addresses(), AccountShape())
+CHECKS = (Addresses(), AccountShape(), SignerAuthority())

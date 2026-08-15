@@ -18,6 +18,7 @@ from . import __version__
 from .checks import default_registry
 from .core.context import Context, Credentials
 from .core.runner import Runner
+from .net.chain import DEFAULT_RPC, ChainReader
 from .net.endpoints import Endpoints
 from .net.http import HttpxProbe
 from .render.terminal import TerminalReport
@@ -80,6 +81,17 @@ def _add_account_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_transport_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=None, help="override the CLOB host")
+    parser.add_argument(
+        "--rpc",
+        default=os.environ.get("POLYGON_RPC_URL", DEFAULT_RPC),
+        help="Polygon RPC, used to tell a Gnosis Safe funder from a deposit "
+             "wallet (default: $POLYGON_RPC_URL, else a public node)",
+    )
+    parser.add_argument(
+        "--no-rpc",
+        action="store_true",
+        help="skip chain reads; funder type resolves to 'unknown'",
+    )
     parser.add_argument("--timeout", type=float, default=12.0, help="per-request timeout, seconds")
 
 
@@ -115,6 +127,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ctx = Context(
             endpoints=endpoints,
             probe=probe,
+            chain=None if args.no_rpc else ChainReader(probe, args.rpc),
             signer_address=args.address,
             funder_address=args.funder,
             credentials=_credentials_from(args),

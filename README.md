@@ -7,39 +7,39 @@ The V2 exchange has a failure mode that costs people weeks: authentication
 succeeds, every read endpoint works, and `POST /order` is rejected every single
 time with an error that points nowhere near the cause. As of 2026-08-15, **49 of
 the ~118 open issues** across `py-clob-client-v2`, `clob-client-v2` and
-`rs-clob-client-v2` are that one bug. The biggest thread
+`rs-clob-client-v2` report it. The biggest thread
 ([py-clob-client-v2#70](https://github.com/Polymarket/py-clob-client-v2/issues/70))
 has 44 comments and has been open since May.
 
-This runs the checks that would have caught it in about four seconds.
+For most of them the cause is a signature type that doesn't match what the
+funder contract actually is, and you cannot tell what it is from any Polymarket
+API. This finds out in about four seconds.
 
 ```console
-$ polymarket-doctor onboard --address 0x9F49…6792
+$ polymarket-doctor onboard --address 0x9F49…6792 --funder 0x3EC7…d649
 
 Polymarket Integration Doctor    https://clob.polymarket.com · protocol v2
 
  0  environment
-    ✓ https://clob.polymarket.com responding  261ms
-    ✓ clock within 0.3s of the exchange  174ms
-    ✓ protocol 2  171ms
+    ✓ https://clob.polymarket.com responding  313ms
+    ✓ clock within 0.7s of the exchange  181ms
+    ✓ protocol 2  176ms
 
  1  identity
-    ✓ signer and funder are both 0x9F49…6792
-    ✗ 0x9F49…6792 is an EOA with no deposit wallet deployed
-      ╭──────────────────────────────────────────────────────────────────────╮
-      │ The V2 exchange rejects EOA-funded orders with "maker address not    │
-      │ allowed, please use the deposit wallet flow". Authentication still   │
-      │ succeeds, which is why this reads as a signing bug.                  │
-      │                                                                      │
-      │ Fix: Deploy a deposit wallet, fund it, and pass it as --funder.      │
-      │                                                                      │
-      │ Known issue: py-clob-client-v2#111 · open 5d                         │
-      │ https://github.com/Polymarket/py-clob-client-v2/issues/111           │
-      ╰──────────────────────────────────────────────────────────────────────╯
+    ✓ signer 0x9F49…6792 funding 0x3EC7…d649
+    ✓ funder is a Gnosis Safe 1.3.0, use signature_type=2
+      The UI deploys this kind when the account was created with an
+      external wallet rather than email or Google. Signing it as
+      POLY_1271 (3) is the most common cause of "the order signer
+      address has to be the address of the API KEY".
+    ✓ 0x9F49…6792 is an owner of the Safe
 ```
 
-Every failure names the open issue it maps to, how long it's been open, and how
-many people are behind you on it.
+That funder is the one from py-clob-client-v2#70, where 44 comments conclude the
+SDK can't sign for it.
+
+Every finding that maps to a known issue cites it, with its state and how many
+people are on the thread.
 
 ## Install
 
@@ -61,8 +61,8 @@ Add the deposit wallet if collateral lives somewhere other than the signer:
 polymarket-doctor onboard --address 0xYourEOA --funder 0xYourDepositWallet
 ```
 
-L2 credentials unlock the key-binding check, which is the one most people need.
-Prefer the environment over flags so secrets stay out of your shell history:
+L2 credentials add the auth stage. Prefer the environment over flags so secrets
+stay out of your shell history:
 
 ```bash
 export POLYMARKET_API_KEY=...
@@ -94,11 +94,10 @@ warning never fails the run.
 **Stage 1 — identity**
 
 - Address format and checksum
-- Whether the funder is a deployed deposit wallet or a bare EOA, asked directly
-  of the relayer
-- **Whether your SDK can sign for that account at all.** Orders from a deposit
-  wallet need Poly1271 with ERC-7739 nested `TypedDataSign`. The Python and
-  TypeScript clients don't emit it; only `rs-clob-client-v2` does
+- **Which signature type your funder actually needs.** This is the one that
+  matters, and it's explained below
+- Whether your signer is an owner of the funder. A Safe only honours its owners,
+  and if yours isn't one, no signature type will work
 
 **Stage 2 — auth**
 
@@ -107,9 +106,48 @@ warning never fails the run.
   `str(body).replace("'", '"')`, which is Python's repr, not JSON — the moment a
   bool or `None` appears the digests diverge, and since GETs have no body this
   looks like a credentials problem
-- **The API key is bound to the same address your orders name as signer.** These
-  differ whenever L1 auth signed as the EOA while orders name the deposit wallet,
-  and they can never converge
+- Which address the credentials authenticate as, since that's the fact stage 1's
+  advice depends on
+
+## The signature type thing
+
+Roughly 49 of the open issues across the v2 clients report the same error:
+
+```
+the order signer address has to be the address of the API KEY
+```
+
+The threads mostly conclude that the SDKs can't sign for deposit wallets and
+that only the Rust client works.
+[Polymarket's answer on ts-sdk#73](https://github.com/Polymarket/ts-sdk/issues/73)
+is different: an API key authenticating the EOA while orders execute from the
+funder is the intended model, and the reported failures were accounts sending
+`signature_type=3` (POLY_1271) for a funder that is actually an older Gnosis Safe
+and needs `2`.
+
+That checks out on chain. The funder in
+[py-clob-client-v2#70](https://github.com/Polymarket/py-clob-client-v2/issues/70)
+and the one Polymarket identified in #73 are both **Gnosis Safe v1.3.0** proxies
+owned by the reporting EOA, with byte-identical proxy code and the same
+implementation address.
+
+Nothing in the Polymarket API tells you which kind you have. `GET /deployed`
+answers the same for `type=SAFE` and `type=WALLET`. The only reliable
+discriminator is asking the contract whether it implements the Safe interface,
+which is why this tool makes one `eth_call` to Polygon:
+
+```
+✓ funder is a Gnosis Safe 1.3.0, use signature_type=2
+  The UI deploys this kind when the account was created with an external wallet
+  rather than email or Google. Signing it as POLY_1271 (3) is the most common
+  cause of "the order signer address has to be the address of the API KEY".
+```
+
+Run with `--no-rpc` and the tool says the funder kind is unknown rather than
+guessing, because a wrong guess here is the exact failure it exists to prevent.
+
+#70 is still open, so treat this as the leading hypothesis rather than the last
+word.
 
 Stages 3 through 7 — funding, market limits, order dry-run, WebSocket, RFQ — are
 not implemented yet. The tool says so rather than reporting a clean run, because
@@ -117,15 +155,17 @@ a green stage 2 is not clearance to trade.
 
 ## What it will not do
 
-- **It never places, cancels, or modifies an order.** Stages 0 through 2 send
-  four GETs and nothing else
+- **It never places, cancels, or modifies an order.** Stages 0 through 2 are
+  reads only: a handful of GETs and two `eth_call`s
 - **It never asks for a private key.** Everything here works from an address plus
   L2 credentials
 - **It never prints your secret.** The passphrase and secret are redacted
   everywhere, the API key is masked, and there's a test that fails if either
   leaks into a finding
-- **It sends nothing anywhere.** No telemetry, no phone-home. The only hosts it
-  talks to are Polymarket's
+- **It sends nothing anywhere.** No telemetry, no phone-home. It talks to
+  Polymarket's hosts and one Polygon RPC, which sees your funder address in a
+  read call. Point it somewhere you trust with `--rpc`, or skip it with
+  `--no-rpc`
 
 ## Notes from the API
 

@@ -33,6 +33,7 @@ class Fact(str, Enum):
     ACCOUNT_KIND = "identity.account_kind"
     SIGNATURE_TYPE = "identity.signature_type"
     DEPOSIT_WALLET_DEPLOYED = "identity.deposit_wallet_deployed"
+    FUNDER_PROFILE = "identity.funder_profile"
 
     # Stage 2 — auth
     API_KEY_IDENTITY = "auth.api_key_identity"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..net.chain import ChainReader
 from ..net.endpoints import Endpoints
 from ..net.http import HttpProbe
 from .facts import FactStore
@@ -46,6 +47,7 @@ class Context:
 
     endpoints: Endpoints
     probe: HttpProbe
+    chain: ChainReader | None = None
     facts: FactStore = field(default_factory=FactStore)
 
     signer_address: str | None = None

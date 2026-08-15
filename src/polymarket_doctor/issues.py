@@ -5,9 +5,9 @@ someone already filed and is sitting unanswered. Telling them "you hit #70,
 here's the workaround, 44 people are behind you" is worth more than telling them
 their signature is invalid.
 
-Counts and dates were read off the GitHub API on 2026-08-15. They drift; ages are
-computed at render time so nothing here goes stale silently. `verify_issues.py`
-in scripts/ re-reads them and fails CI when a number moves.
+Counts and dates were read off the GitHub API on 2026-08-15. Comment counts drift
+and some of these will be closed by the time you read them; ages are computed at
+render time so at least the staleness is visible rather than silently wrong.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ class KnownIssue:
     opened: date
     comments: int
     workaround: str | None = None
+    # Set when the thread has an answer. A closed issue is often the more useful
+    # citation — it's where the resolution actually lives.
+    closed: date | None = None
 
     @property
     def url(self) -> str:
@@ -37,16 +40,28 @@ class KnownIssue:
         return ((today or date.today()) - self.opened).days
 
     def summarize(self, today: date | None = None) -> str:
-        parts = [self.slug, f"open {self.age_days(today)}d"]
+        if self.closed:
+            parts = [self.slug, f"closed {self.closed.isoformat()}"]
+        else:
+            parts = [self.slug, f"open {self.age_days(today)}d"]
         if self.comments:
             parts.append(f"{self.comments} affected")
         return " · ".join(parts)
 
 
-# The 49-issue cluster. Every one of these is the same root cause: V2 requires
-# the deposit-wallet flow (Poly1271 + ERC-7739 nested TypedDataSign), the Python
-# and TypeScript SDKs can't produce that signature, so /auth succeeds and every
-# POST /order is rejected. #111 has the evidence matrix across all three SDKs.
+# The ~49-issue cluster, all reporting "the order signer address has to be the
+# address of the API KEY".
+#
+# The threads converge on "the SDKs can't sign for deposit wallets, only Rust
+# can". Polymarket's answer on ts-sdk#73 is that the asymmetry is intended — L1
+# auth identifies the EOA, orders execute from the funder — and that the
+# reported failures were accounts sending signature_type=3 for a funder that is
+# actually an older Gnosis Safe and needs 2.
+#
+# Checked on chain, that holds: the funder in #70 and the one Polymarket named
+# in #73 are both Gnosis Safe v1.3.0 proxies owned by the reporting EOA. So this
+# tool treats a signature-type mismatch as the first hypothesis, not an SDK
+# capability gap. #70 is still open, so the story isn't finished.
 SIGNER_IDENTITY_MISMATCH = KnownIssue(
     repo="py-clob-client-v2",
     number=70,
@@ -54,20 +69,36 @@ SIGNER_IDENTITY_MISMATCH = KnownIssue(
           "API key to EOA, never the deposit wallet",
     opened=date(2026, 5, 19),
     comments=44,
-    workaround="rs-clob-client-v2 with SignatureType::Poly1271 places orders on "
-               "this flow today; it's the only client that emits the ERC-7739 "
-               "wrapping the deposit wallet's isValidSignature expects.",
+    workaround="Confirm what your funder actually is before changing SDKs. If "
+               "it answers VERSION()/getOwners() it's a Gnosis Safe and wants "
+               "signature_type=2, not 3.",
 )
 
-DEPOSIT_WALLET_REQUIRED = KnownIssue(
+# Polymarket's own diagnosis, and the closest thing to an authoritative answer
+# in the whole cluster.
+SIGNATURE_TYPE_MISMATCH = KnownIssue(
+    repo="ts-sdk",
+    number=73,
+    title="auth: beginAuthentication signs ClobAuth with EOA address, ignoring "
+          "POLY_1271 deposit wallet shape",
+    opened=date(2026, 5, 28),
+    closed=date(2026, 6, 2),
+    comments=6,
+    workaround="Polymarket's reply: L1/L2 identity (the signer) is meant to "
+               "differ from order identity (the funder). A funder deployed by "
+               "the UI for an external wallet is a Gnosis Safe and needs "
+               "signature_type=2. The unified SDK infers this for you.",
+)
+
+EOA_FLOW_REJECTED = KnownIssue(
     repo="py-clob-client-v2",
-    number=111,
-    title="Root cause for 'maker address not allowed': V2 requires the "
-          "deposit-wallet flow (Poly1271 + ERC-7739 nested signing)",
-    opened=date(2026, 8, 10),
-    comments=0,
-    workaround="Fund and sign from the deployed deposit wallet, not the EOA or "
-               "a derived Safe.",
+    number=53,
+    title="EOA basic flow rejected: 'maker address not allowed, please use the "
+          "deposit wallet flow'",
+    opened=date(2026, 5, 8),
+    comments=3,
+    workaround="V2 stopped accepting EOA-funded orders after the 2026-04-28 "
+               "cutover. Fund through a deposit wallet.",
 )
 
 API_KEY_CREATION_BLOCKED = KnownIssue(
@@ -148,7 +179,8 @@ V1_SDK_ARCHIVED = KnownIssue(
 
 ALL: tuple[KnownIssue, ...] = (
     SIGNER_IDENTITY_MISMATCH,
-    DEPOSIT_WALLET_REQUIRED,
+    SIGNATURE_TYPE_MISMATCH,
+    EOA_FLOW_REJECTED,
     API_KEY_CREATION_BLOCKED,
     CLOUDFLARE_BLOCKS_KEY_CREATION,
     ORDER_VERSION_MISMATCH,

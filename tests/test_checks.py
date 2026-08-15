@@ -3,12 +3,12 @@ from __future__ import annotations
 import time
 
 import pytest
-from conftest import DEPOSIT_WALLET, EOA, StubProbe, http_error, ok, unreachable
+from conftest import EOA, StubProbe, http_error, ok, unreachable
 
 from polymarket_doctor import issues
 from polymarket_doctor.checks.auth import HmacBodyEncoding
 from polymarket_doctor.checks.environment import ClobReachable, ClockSkew, ProtocolVersion
-from polymarket_doctor.checks.identity import AccountShape, Addresses, SignatureType
+from polymarket_doctor.checks.identity import Addresses
 from polymarket_doctor.core.check import Severity
 from polymarket_doctor.core.facts import Fact
 
@@ -96,73 +96,6 @@ class TestAddresses:
     def test_malformed_addresses_are_rejected(self, make_context, bad):
         ctx = make_context(StubProbe(), signer_address=bad)
         assert Addresses().run(ctx).severity is Severity.FAIL
-
-
-class TestAccountShape:
-    """The 49-issue cluster lives here."""
-
-    def _context(self, make_context, *, deployed: bool, funder: str, sdk=None):
-        ctx = make_context(
-            StubProbe({"/deployed": ok({"deployed": deployed})}),
-            signer_address=EOA,
-            funder_address=funder,
-        )
-        ctx.facts.set(Fact.SIGNER_ADDRESS, EOA)
-        ctx.facts.set(Fact.FUNDER_ADDRESS, funder)
-        ctx.facts.set(Fact.SDK, sdk)
-        return ctx
-
-    def test_undeployed_eoa_is_rejected_with_the_root_cause(self, make_context):
-        ctx = self._context(make_context, deployed=False, funder=EOA)
-        finding = AccountShape().run(ctx)
-
-        assert finding.severity is Severity.FAIL
-        assert finding.issue is issues.DEPOSIT_WALLET_REQUIRED
-        assert "maker address not allowed" in finding.detail
-        assert ctx.facts.get(Fact.SIGNATURE_TYPE) is SignatureType.EOA
-
-    def test_deployed_deposit_wallet_selects_poly1271(self, make_context):
-        ctx = self._context(make_context, deployed=True, funder=DEPOSIT_WALLET)
-        finding = AccountShape().run(ctx)
-
-        assert finding.severity is Severity.PASS
-        assert ctx.facts.get(Fact.SIGNATURE_TYPE) is SignatureType.POLY_1271
-        assert ctx.facts.get(Fact.DEPOSIT_WALLET_DEPLOYED) is True
-
-    def test_python_sdk_cannot_sign_for_a_deposit_wallet(self, make_context):
-        # /auth passes and every POST /order is rejected, because the SDK can't
-        # emit the ERC-7739 wrapping. This is #70, 44 people deep.
-        ctx = self._context(
-            make_context,
-            deployed=True,
-            funder=DEPOSIT_WALLET,
-            sdk={"module": "py_clob_client_v2", "label": "py-clob-client-v2", "version": "1.1.0"},
-        )
-        finding = AccountShape().run(ctx)
-
-        assert finding.severity is Severity.FAIL
-        assert finding.issue is issues.SIGNER_IDENTITY_MISMATCH
-        assert "ERC-7739" in finding.detail
-
-    def test_rust_sdk_is_accepted(self, make_context):
-        ctx = self._context(
-            make_context,
-            deployed=True,
-            funder=DEPOSIT_WALLET,
-            sdk={"module": "rs_clob_client_v2", "label": "rs-clob-client-v2", "version": "0.5.1"},
-        )
-        assert AccountShape().run(ctx).severity is Severity.PASS
-
-    def test_unreadable_relayer_fails_rather_than_guessing(self, make_context):
-        ctx = make_context(
-            StubProbe({"/deployed": http_error(500)}),
-            signer_address=EOA,
-            funder_address=EOA,
-        )
-        ctx.facts.set(Fact.SIGNER_ADDRESS, EOA)
-        ctx.facts.set(Fact.FUNDER_ADDRESS, EOA)
-        ctx.facts.set(Fact.SDK, None)
-        assert AccountShape().run(ctx).severity is Severity.FAIL
 
 
 class TestHmacBodyEncoding:

@@ -1,14 +1,18 @@
-"""Stage 2 — do the credentials work, and is the key bound to the right address?
+"""Stage 2 — do the credentials work, and which address do they authenticate as?
 
-The headline check is the last one. An API key is bound to whichever address
-signed the L1 message that minted it. An order names its funder as signer. When
-those differ the exchange returns
+An API key is bound to whichever address signed the L1 message that minted it.
+Per Polymarket on ts-sdk#73, that address is meant to be the signing EOA while
+orders execute from the funder, so the two differing is the documented model
+rather than a bug. Establishing which address the key actually answers for is
+still worth doing: it's two GETs, and it's the fact you need in hand before the
+signature-type question in stage 1 means anything.
+
+The error everyone in the #70 cluster sees —
 
     the order signer address has to be the address of the API KEY
 
-and nothing about that sentence points at the L1 step that happened minutes
-earlier. Comparing the two up front is a couple of HTTP calls and saves the
-multi-week investigation that py-clob-client-v2#70 documents 44 people doing.
+— is usually the wrong signature_type for the funder, which stage 1 resolves
+on chain. This stage just pins down the identity half.
 """
 
 from __future__ import annotations
@@ -102,11 +106,11 @@ class HmacBodyEncoding(Check):
 
 
 class KeyIdentity(Check):
-    """Compare the address the API key is bound to against the order signer."""
+    """Establish which address the credentials actually authenticate as."""
 
     id = "auth.key-identity"
     stage = Stage.AUTH
-    title = "API key identity matches the order signer"
+    title = "API key identity"
     reads = frozenset({
         Fact.HAS_L2_CREDENTIALS,
         Fact.SIGNER_ADDRESS,
@@ -151,27 +155,35 @@ class KeyIdentity(Check):
 
         ctx.facts.set(Fact.API_KEY_IDENTITY, bound_to)
 
-        if bound_to.lower() == funder.lower():
+        if bound_to.lower() == signer.lower():
+            # The intended shape per Polymarket on ts-sdk#73: the key identifies
+            # the signer, orders execute from the funder. Not a mismatch.
+            note = (
+                f"orders will execute from {_short(funder)}"
+                if funder.lower() != signer.lower()
+                else "signer funds itself"
+            )
             return Finding.ok(
-                f"key is bound to the order signer {_short(funder)}",
+                f"key authenticates as {_short(bound_to)}, {note}",
                 api_key_identity=bound_to,
+                order_funder=funder,
             )
 
-        return Finding.fail(
-            "API key is bound to a different address than your orders name",
+        return Finding.warn(
+            f"key authenticates as the funder {_short(bound_to)}, not the signer",
             detail=(
                 f"Key identity:  {bound_to}\n"
-                f"Order signer:  {funder}\n\n"
-                "These can never match. L1 auth signed as the EOA, so the key "
-                "was minted against it, while orders correctly name the deposit "
-                "wallet. Every POST /order comes back with \"the order signer "
-                "address has to be the address of the API KEY\" while /auth and "
-                "every read endpoint keep working."
+                f"Signer:        {signer}\n\n"
+                "The documented model is that L1 auth identifies the signing "
+                "EOA and orders name the funder. A key minted against the "
+                "funder instead is the inverse, and whether the exchange "
+                "accepts it depends on the order path you use."
             ),
-            remedy=issues.SIGNER_IDENTITY_MISMATCH.workaround,
-            issue=issues.SIGNER_IDENTITY_MISMATCH,
+            remedy="Re-derive credentials signing as the EOA, so key identity "
+                   "and order signer match the documented shape.",
+            issue=issues.SIGNATURE_TYPE_MISMATCH,
             api_key_identity=bound_to,
-            order_signer=funder,
+            signer=signer,
         )
 
     @staticmethod
