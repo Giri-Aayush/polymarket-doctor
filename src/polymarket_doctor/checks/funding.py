@@ -65,6 +65,29 @@ class CollateralBalance(Check):
                        "credential problem.",
             )
 
+        if response.status == 404:
+            # Observed live 2026-08-15: valid credentials, deposit-wallet
+            # funder, and the endpoint answers 404 rather than a zero balance.
+            # Auth was accepted (unauthenticated requests get 401 here), so
+            # the miss is the account lookup: the CLOB has no balance record
+            # until this signer/funder combination has interacted with the
+            # exchange. Not documented anywhere; every SDK thread assumes the
+            # answer is a number.
+            self._record(ctx, None, None)
+            return Finding.warn(
+                "the exchange has no balance record for this account yet",
+                detail=f"GET {BALANCE_PATH} returned 404 with authentication "
+                       "accepted — a 401 is what rejected credentials look "
+                       "like. The CLOB appears to create the balance record on "
+                       "first interaction, so a brand-new account reads as "
+                       "missing rather than zero.",
+                remedy="If this account has traded before, re-run with the "
+                       "funder and signature type the account actually uses. "
+                       "If it's new, this is expected until first deposit or "
+                       "trade.",
+                status=response.status,
+            )
+
         if not response.ok:
             self._record(ctx, None, None)
             return Finding.fail(

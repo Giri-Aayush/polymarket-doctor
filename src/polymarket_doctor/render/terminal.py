@@ -127,10 +127,17 @@ class TerminalReport:
         if failures:
             first = failures[0]
             plural = "s" if len(failures) > 1 else ""
+            skipped = sum(1 for o in report.outcomes if o.severity is Severity.SKIP)
+            # Only claim skipping when something actually was — a failure with
+            # no dependents (funding, say) shouldn't read like it halted the run.
+            tail = (
+                f"{skipped} dependent check{'s' if skipped > 1 else ''} skipped."
+                if skipped else "Nothing depended on it; every other check ran."
+            )
             summary = Text.assemble(
                 (f" {len(failures)} blocking failure{plural}", "bold red"),
                 (f", first at {first.check.stage.label}. ", ""),
-                ("Later stages were skipped because they depend on it.", "bright_black"),
+                (tail, "bright_black"),
             )
         elif warnings:
             summary = Text.assemble(

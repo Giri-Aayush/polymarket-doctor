@@ -8,7 +8,7 @@ a working setup — the check has to warn and say so, not block.
 
 from __future__ import annotations
 
-from conftest import EOA, StubProbe, http_error, ok
+from conftest import DEPOSIT_WALLET, EOA, StubProbe, http_error, ok
 
 from polymarket_doctor import issues
 from polymarket_doctor.checks.funding import CollateralBalance
@@ -170,3 +170,23 @@ def test_secrets_never_appear_in_any_finding(make_context):
         rendered = repr(finding)
         assert CREDS.secret not in rendered
         assert CREDS.passphrase not in rendered
+
+
+def test_404_reads_as_unregistered_account_not_a_dead_endpoint(make_context):
+    # Live observation 2026-08-15: valid creds + never-traded signer/funder
+    # combo → 404, while bad creds → 401. The two must not be conflated.
+    ctx = make_context(
+        StubProbe({"/balance-allowance": http_error(404)}),
+        credentials=CREDS,
+    )
+    ctx.facts.set(Fact.HAS_L2_CREDENTIALS, True)
+    ctx.facts.set(Fact.SIGNER_ADDRESS, EOA)
+    ctx.facts.set(Fact.FUNDER_ADDRESS, DEPOSIT_WALLET)
+    ctx.facts.set(Fact.SIGNATURE_TYPE, None)
+    ctx.facts.set(Fact.CLOCK_SKEW_SECONDS, 0.0)
+
+    finding = CollateralBalance().run(ctx)
+
+    assert finding.severity is Severity.WARN
+    assert "no balance record" in finding.summary
+    assert ctx.facts.get(Fact.COLLATERAL_BALANCE) is None
