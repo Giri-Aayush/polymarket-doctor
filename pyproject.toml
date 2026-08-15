@@ -31,6 +31,7 @@ dependencies = [
     # need one. Without it is_address raises ImportError at first use.
     "eth-utils>=4.1",
     "eth-hash[pycryptodome]>=0.7",
+    "websockets>=12",
 ]
 
 [project.optional-dependencies]

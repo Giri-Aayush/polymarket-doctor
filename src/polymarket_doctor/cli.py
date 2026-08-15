@@ -59,6 +59,12 @@ def _add_account_args(parser: argparse.ArgumentParser) -> None:
         help=f"wallet that signs (default: ${ENV_ADDRESS})",
     )
     parser.add_argument(
+        "--token",
+        default=os.environ.get("POLYMARKET_TOKEN_ID"),
+        help="CLOB token id to run market checks against (default: "
+             "$POLYMARKET_TOKEN_ID; omitted, a liquid market is picked)",
+    )
+    parser.add_argument(
         "--funder",
         default=os.environ.get(ENV_FUNDER),
         help=f"deposit wallet that holds collateral, if different (default: ${ENV_FUNDER})",
@@ -143,6 +149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             chain=None if args.no_rpc else ChainReader(probe, args.rpc),
             signer_address=args.address,
             funder_address=args.funder,
+            token_id=args.token,
             credentials=_credentials_from(args),
         )
         only = [args.check_id] if args.command == "check" else None

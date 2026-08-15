@@ -52,6 +52,7 @@ class Context:
 
     signer_address: str | None = None
     funder_address: str | None = None
+    token_id: str | None = None
     credentials: Credentials | None = None
 
     # Off by default. Every check that would place, cancel, or mutate anything

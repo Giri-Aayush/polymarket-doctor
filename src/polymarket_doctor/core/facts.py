@@ -39,6 +39,26 @@ class Fact(str, Enum):
     API_KEY_IDENTITY = "auth.api_key_identity"
     HAS_L2_CREDENTIALS = "auth.has_l2_credentials"
 
+    # Stage 3 — funding
+    COLLATERAL_BALANCE = "funding.collateral_balance"
+    EXCHANGE_APPROVALS = "funding.exchange_approvals"
+
+    # Stage 4 — market limits
+    TOKEN_ID = "market.token_id"
+    TICK_SIZE = "market.tick_size"
+    NEG_RISK = "market.neg_risk"
+    FEE_RATE_BPS = "market.fee_rate_bps"
+    MIN_ORDER_SIZE = "market.min_order_size"
+
+    # Stage 5 — order dry run
+    ORDER_PAYLOAD_VALID = "order.payload_valid"
+
+    # Stage 6 — websocket
+    WS_CONNECTED = "ws.connected"
+
+    # Stage 7 — rfq
+    RFQ_REACHABLE = "rfq.reachable"
+
 
 class FactStore:
     """Write-once key/value store threaded through a run.
