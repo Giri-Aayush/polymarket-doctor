@@ -61,8 +61,21 @@ Add the deposit wallet if collateral lives somewhere other than the signer:
 polymarket-doctor onboard --address 0xYourEOA --funder 0xYourDepositWallet
 ```
 
-L2 credentials add the auth stage. Prefer the environment over flags so secrets
-stay out of your shell history:
+L2 credentials add the auth and funding stages. If you don't have credentials
+yet, `scripts/derive-credentials.py` derives them from your wallet — locally,
+in your terminal, which is the one place a private key belongs. The doctor
+itself never reads `POLYMARKET_PRIVATE_KEY`; only that helper does, for one
+signature.
+
+```bash
+pip install py-clob-client-v2
+export POLYMARKET_PRIVATE_KEY=0x...
+eval "$(python scripts/derive-credentials.py)"
+polymarket-doctor onboard --address 0xYourEOA --funder 0xYourDepositWallet
+```
+
+Already have credentials? Export them directly — prefer the environment over
+flags so secrets stay out of your shell history:
 
 ```bash
 export POLYMARKET_API_KEY=...
