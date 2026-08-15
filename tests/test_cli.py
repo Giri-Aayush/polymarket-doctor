@@ -25,6 +25,11 @@ def test_check_ids_are_stage_prefixed():
         Stage.ENVIRONMENT: "env.",
         Stage.IDENTITY: "identity.",
         Stage.AUTH: "auth.",
+        Stage.FUNDING: "funding.",
+        Stage.MARKET_LIMITS: "market.",
+        Stage.ORDER_DRY_RUN: "order.",
+        Stage.WEBSOCKET: "ws.",
+        Stage.RFQ: "rfq.",
     }
     for check in default_registry():
         assert check.id.startswith(prefixes[check.stage]), check.id
@@ -88,8 +93,9 @@ class TestTerminalRender:
 
         assert "use the deposit wallet" in output
         assert "py-clob-client-v2#70" in output
-        # A clean-looking run must not read as clearance to trade.
-        assert "not a green light" in output
+        # With every stage implemented, the not-a-green-light caveat is retired;
+        # it only reappears if a stage is ever pulled back into PENDING_STAGES.
+        assert "not a green light" not in output
 
 
 def test_unknown_check_id_suggests_the_closest_real_one(capsys):

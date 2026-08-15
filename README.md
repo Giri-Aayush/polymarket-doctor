@@ -109,6 +109,41 @@ warning never fails the run.
 - Which address the credentials authenticate as, since that's the fact stage 1's
   advice depends on
 
+**Stage 3 — funding**
+
+- A signed read of `/balance-allowance`. A zero balance is a warning, never a
+  failure: that endpoint reports 0 for genuinely funded accounts because UI
+  deposits sit on an internal ledger it doesn't see (#105). Don't gate order
+  placement on it
+
+**Stage 4 — market limits**
+
+- Resolves a market (yours via `--token`, or the highest-volume open one) and
+  reads its tick size, neg-risk flag, and fee rate. On 0.001-tick books the
+  finding carries the taker-decimal-count trap that rejects every market order
+  computed with the coarse default (#99)
+
+**Stage 5 — order dry run**
+
+- Builds the exact order payload a client would sign — maker, price snapped to
+  the tick grid, amounts in 6-decimal base units computed with `Decimal` — and
+  validates every invariant the server enforces. Nothing is signed and nothing
+  is sent; the only request is a GET of the book
+
+**Stage 6 — websocket**
+
+- Connects to the market channel, subscribes, and measures time to first frame.
+  The passing finding carries the production caveat that matters: the stream is
+  known to stop silently while the socket stays open (#26), so partners need
+  last-frame staleness tracking, not connection liveness
+
+**Stage 7 — RFQ**
+
+- Reaches the RFQ gateway on its own host, counts combo markets, and documents
+  the maker flow (quote → cancel → last-look confirm) plus the gateway's
+  distinct error vocabulary. Quote submission is deliberately not exercised —
+  it would place a real quote
+
 ## The signature type thing
 
 Roughly 49 of the open issues across the v2 clients report the same error:
@@ -149,14 +184,12 @@ guessing, because a wrong guess here is the exact failure it exists to prevent.
 #70 is still open, so treat this as the leading hypothesis rather than the last
 word.
 
-Stages 3 through 7 — funding, market limits, order dry-run, WebSocket, RFQ — are
-not implemented yet. The tool says so rather than reporting a clean run, because
-a green stage 2 is not clearance to trade.
-
 ## What it will not do
 
-- **It never places, cancels, or modifies an order.** Stages 0 through 2 are
-  reads only: a handful of GETs and two `eth_call`s
+- **It never places, cancels, or modifies an order.** Every request across all
+  eight stages is a GET, a read-only `eth_call`, or a websocket subscribe. The
+  order dry-run builds and validates the payload locally without signing it,
+  and the RFQ stage documents the maker endpoints without calling them
 - **It never asks for a private key.** Everything here works from an address plus
   L2 credentials
 - **It never prints your secret.** The passphrase and secret are redacted
@@ -182,6 +215,12 @@ Things verified against production on 2026-08-15 that cost time to discover:
   placement on it
 - Minimum order is 5 outcome tokens regardless of notional, and tick size varies
   per market between 0.01 and 0.001
+- Order-book bids come back ascending by price, so best bid is the last entry,
+  not the first
+- Market-channel websocket frames arrive wrapped in a JSON array, which the
+  AsyncAPI spec's examples don't show
+- The unified SDK ships on PyPI as `polymarket-client` and imports as
+  `polymarket`; the PyPI name `polymarket` belongs to an unrelated package
 
 ## Development
 

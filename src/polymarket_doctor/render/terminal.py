@@ -57,12 +57,17 @@ class TerminalReport:
             self._line(outcome)
             if outcome.severity in (Severity.FAIL, Severity.WARN):
                 self._explain(outcome)
-            elif outcome.finding.detail:
+            elif outcome.finding.detail or outcome.finding.issue:
                 # Passing checks get a dim note rather than a panel, so a clean
-                # run still reads as a list.
-                self._console.print(
-                    Padding(Text(outcome.finding.detail, style="bright_black"), (0, 0, 1, 6))
-                )
+                # run still reads as a list. An issue on a PASS is a heads-up
+                # ("this works, but #99 bites this market type in production").
+                note = Text(outcome.finding.detail or "", style="bright_black")
+                if outcome.finding.issue:
+                    if outcome.finding.detail:
+                        note.append("\n")
+                    note.append(f"See {outcome.finding.issue.summarize(self._today)} · "
+                                f"{outcome.finding.issue.url}", style="bright_black")
+                self._console.print(Padding(note, (0, 0, 1, 6)))
         self._console.print()
 
     def _line(self, outcome: Outcome) -> None:
@@ -104,6 +109,8 @@ class TerminalReport:
         )
 
     def _pending(self) -> None:
+        if not PENDING_STAGES:
+            return
         # Widest label decides the column so the descriptions line up.
         width = max(len(stage.label) for stage, _ in PENDING_STAGES)
         for stage, description in PENDING_STAGES:
@@ -134,10 +141,12 @@ class TerminalReport:
             summary = Text(" All implemented gates passed.", style="bold green")
 
         self._console.print(summary)
-        self._console.print(
-            Text(" Stages 3-7 are not implemented, so this is not a green light "
-                 "to trade.", style="bright_black")
-        )
+        if PENDING_STAGES:
+            labels = ", ".join(str(stage.value) for stage, _ in PENDING_STAGES)
+            self._console.print(
+                Text(f" Stages {labels} are not implemented, so this is not a "
+                     "green light to trade.", style="bright_black")
+            )
         self._console.print()
 
 
