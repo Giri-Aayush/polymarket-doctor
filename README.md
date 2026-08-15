@@ -70,7 +70,7 @@ signature.
 ```bash
 pip install py-clob-client-v2
 export POLYMARKET_PRIVATE_KEY=0x...
-eval "$(python scripts/derive-credentials.py)"
+creds="$(python scripts/derive-credentials.py)" && eval "$creds"
 polymarket-doctor onboard --address 0xYourEOA --funder 0xYourDepositWallet
 ```
 

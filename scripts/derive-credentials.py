@@ -11,7 +11,7 @@ signature, and never written anywhere.
 Usage:
     pip install py-clob-client-v2
     export POLYMARKET_PRIVATE_KEY=0x...   # the EOA that controls your account
-    eval "$(python scripts/derive-credentials.py)"
+    creds="$(python scripts/derive-credentials.py)" && eval "$creds"
     polymarket-doctor onboard --address 0xYourEOA --funder 0xYourFunder
 
 The credentials come back bound to the EOA that signed — that is the intended
@@ -26,6 +26,7 @@ evaluates the three exports.
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 HOST = "https://clob.polymarket.com"
@@ -45,10 +46,19 @@ def main() -> None:
             "  export POLYMARKET_PRIVATE_KEY=0x...  (never pass it as a flag —\n"
             "  flags land in shell history; the env var stays in this process)"
         )
-    if not key.startswith("0x"):
-        # Some wallet exports omit the prefix, and the failure that causes is
-        # silent and far away from here.
-        fail("private key must start with 0x — wallet exports sometimes drop it")
+    # Validate the shape ourselves rather than letting the SDK throw a
+    # traceback. The observed failure mode is copying a placeholder along with
+    # the key ("0xPASTE<hex>"), and the SDK's binascii error names the symptom,
+    # not the mistake.
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", key):
+        fail(
+            "POLYMARKET_PRIVATE_KEY is not a private key. Expected 0x followed "
+            "by exactly 64 hex characters.\n"
+            "  Common causes: placeholder text left in front of the pasted key, "
+            "a missing 0x prefix,\n"
+            "  or a truncated copy. Re-copy it from your wallet and re-run the "
+            "export line."
+        )
 
     try:
         from py_clob_client_v2 import ClobClient
@@ -59,8 +69,11 @@ def main() -> None:
             "It is only needed by this helper, not by polymarket-doctor."
         )
 
-    client = ClobClient(host=HOST, chain_id=POLYGON, key=key)
-    address = client.get_address()
+    try:
+        client = ClobClient(host=HOST, chain_id=POLYGON, key=key)
+        address = client.get_address()
+    except Exception as exc:  # noqa: BLE001 - report, never traceback
+        fail(f"the SDK rejected the key: {exc}")
     print(f"deriving credentials for {address} against {HOST} …", file=sys.stderr)
 
     try:
