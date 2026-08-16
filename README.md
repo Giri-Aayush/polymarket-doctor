@@ -1,8 +1,10 @@
 # polymarket-doctor
 
-**Find out why your Polymarket integration won't place orders, before you write the trading code.**
+**A preflight tool that tells you why your Polymarket integration won't place orders, before you write the trading code.**
 
 [![CI](https://github.com/Giri-Aayush/polymarket-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/Giri-Aayush/polymarket-doctor/actions/workflows/ci.yml)
+![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
+![Tests](https://img.shields.io/badge/tests-238-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.10--3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -17,6 +19,12 @@ comments and has been open since May.
 For most people the cause is a signature type that doesn't match what their
 funder contract actually is, and no Polymarket API will tell you which one you
 have. This tool finds out in about four seconds.
+
+<!--
+Demo GIF: run `vhs docs/demo.tape` (see docs/DEMO.md) to generate docs/demo.gif,
+then uncomment the next line so it renders at the top of the README.
+![polymarket-doctor onboarding a Gnosis Safe account](docs/demo.gif)
+-->
 
 ```console
 $ polymarket-doctor onboard --address 0x9F49…6792 --funder 0x3EC7…d649
@@ -48,11 +56,7 @@ thread.
 
 ---
 
-**Contents** · [Install](#install) · [Use](#use) · [Production](#running-it-in-production) · [The eight
-stages](#the-eight-stages) · [The signature-type
-thing](#the-signature-type-thing) · [What it will not
-do](#what-it-will-not-do) · [Notes from the API](#notes-from-the-api) ·
-[Verification](#verification) · [Development](#development)
+**Contents**&nbsp;&nbsp;[Install](#install)&nbsp;·&nbsp;[Use](#use)&nbsp;·&nbsp;[Production](#running-it-in-production)&nbsp;·&nbsp;[The eight stages](#the-eight-stages)&nbsp;·&nbsp;[The signature-type thing](#the-signature-type-thing)&nbsp;·&nbsp;[What it will not do](#what-it-will-not-do)&nbsp;·&nbsp;[Notes from the API](#notes-from-the-api)&nbsp;·&nbsp;[Verification](#verification)&nbsp;·&nbsp;[Development](#development)
 
 ## Install
 
@@ -357,12 +361,12 @@ discover:
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test, not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each one, with the command to reproduce it: 238 tests, CI green on Python
-3.10 through 3.13, 100% line coverage,, side-by-side `curl`-versus-tool measurements, and the live
-rejection contracts (`maker address not allowed…`, the RFQ HMAC error) captured
-without ever placing an order. What the tool deliberately does not verify is
-listed there too: a successful fill, a live quote, and the still-open #70 root
-cause.
+for each one, with the command to reproduce it: 238 tests at 100% line coverage,
+CI green on Python 3.10 through 3.13, side-by-side `curl`-versus-tool
+measurements, and the live rejection contracts (`maker address not allowed…`,
+the RFQ HMAC error) captured without ever placing an order. What the tool
+deliberately does not verify is listed there too: a successful fill, a live
+quote, and the still-open #70 root cause.
 
 ## Development
 
