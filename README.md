@@ -4,7 +4,6 @@
 
 [![CI](https://github.com/Giri-Aayush/polymarket-doctor/actions/workflows/ci.yml/badge.svg)](https://github.com/Giri-Aayush/polymarket-doctor/actions/workflows/ci.yml)
 ![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
-![Tests](https://img.shields.io/badge/tests-238-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.10--3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
