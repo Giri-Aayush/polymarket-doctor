@@ -83,12 +83,37 @@ Run with real L2 credentials derived from a throwaway EOA
 These runs used private credentials and are therefore not replayable from this
 file; replay them with your own wallet via `scripts/derive-credentials.py`.
 
-## 5. What is deliberately not verified
+## 5. Rejection contracts (captured live, nothing executable)
 
-- **Order placement.** The tool never posts an order; stage 5 builds and
-  validates the payload locally. Verifying actual acceptance means trading —
-  out of scope for a diagnostic, permanently.
-- **RFQ quote submission.** A credentialed quote is a real quote.
+The doctor quotes the exchange's refusal strings. Both were captured against
+production on 2026-08-15 via `scripts/capture-rejection-contracts.py`, using
+probes structurally unable to result in a fill — a signed order from an
+unfunded EOA the V2 gate refuses at the door, and an empty-body POST that
+carries no quote. Both refused, each in its service's own vocabulary:
+
+- **Order gate** — a real signed order (maker = the unfunded throwaway EOA, 5
+  shares at one tick) returned:
+  ```
+  {"error":"maker address not allowed, please use the deposit wallet flow"}
+  ```
+  The exact string stage 1 cites — the center of the ~49-issue cluster,
+  confirmed from a live signed order, not paraphrased from docs.
+- **RFQ maker gate** — an authenticated empty-body POST to `/v1/maker/quotes`
+  returned `401`:
+  ```
+  {"error":"rpc error: code = PermissionDenied desc = could not validate hmac signature"}
+  ```
+  A third distinct auth-error vocabulary: the CLOB says
+  `Unauthorized/Invalid api key`, an RFQ request with no address header says
+  `invalid l2 address header`, and an RFQ request with a present-but-rejected
+  HMAC says the gRPC `PermissionDenied` above. An integrator grepping one
+  service's error table for another's strings finds nothing.
+
+## 5b. Still not verified, by design
+
+- **Order acceptance.** Refusal is captured above; a *successful* fill is not,
+  because that means trading — permanently out of scope for a diagnostic.
+- **A live RFQ quote.** Refusal is captured; a valid quote is a real quote.
 - **The #70 root cause.** The Safe-vs-signature-type diagnosis matches
   Polymarket's maintainer statement (ts-sdk#73) and the on-chain evidence
   above, but the issue is open; this repo treats it as the leading hypothesis.

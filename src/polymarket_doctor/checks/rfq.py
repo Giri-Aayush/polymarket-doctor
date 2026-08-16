@@ -103,10 +103,13 @@ class RfqGateway(Check):
             f"confirm: POST {MAKER_QUOTE_PATH}, POST {MAKER_CANCEL_PATH}, "
             f"POST {MAKER_CONFIRM_PATH}, all under the five POLY_* L2 headers "
             f"per the published OpenAPI spec. Its error strings are its own "
-            f"too: an unauthenticated quote POST answers "
-            f'{{"error": "{RFQ_AUTH_ERROR}"}}, which appears in no CLOB error '
-            f"table — when that shows up in your logs, look here, not at the "
-            f"CLOB."
+            f"too, and it has more than one auth-failure mode: a quote POST "
+            f'with no address header answers {{"error": "{RFQ_AUTH_ERROR}"}}, '
+            f"while one with a present-but-rejected HMAC answers the gRPC "
+            f'{{"error": "rpc error: code = PermissionDenied desc = could not '
+            f'validate hmac signature"}} (both verified live). Neither appears '
+            f"in any CLOB error table — when they show up in your logs, look "
+            f"here, not at the CLOB."
         )
 
         if not ctx.facts.get(Fact.HAS_L2_CREDENTIALS):

@@ -57,7 +57,9 @@ class TestRfqGateway:
         assert "/v1/maker/quotes" in detail
         assert "/v1/maker/quotes/cancel" in detail
         assert "/v1/maker/confirmations" in detail
-        assert "invalid l2 address header" in detail  # the RFQ error vocabulary
+        # Both RFQ auth-failure vocabularies, captured live 2026-08-15.
+        assert "invalid l2 address header" in detail   # no address header
+        assert "could not validate hmac signature" in detail  # rejected HMAC
         assert_read_only(probe)
 
     def test_without_credentials_notes_quotes_were_not_exercised(self, make_context):
