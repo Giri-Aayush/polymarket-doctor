@@ -123,3 +123,16 @@ def test_safe_coerces_bytes_plain_enums_and_cycles():
 
     deep = {"a": [{"b": (1, b"\x2a")}]}
     assert _safe(deep) == {"a": [{"b": [1, "0x2a"]}]}
+
+
+def test_safe_handles_a_plain_enum_and_an_opaque_object():
+    import enum
+
+    from polymarket_doctor.render.json_report import _safe
+
+    class Color(enum.Enum):  # a plain Enum, not int/str backed
+        RED = "red"
+
+    assert _safe(Color.RED) == "red"           # Enum branch
+    assert _safe({1, 2}) == str({1, 2})        # set -> str() fallback
+    assert isinstance(_safe(object()), str)    # opaque -> str() fallback

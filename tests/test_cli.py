@@ -131,3 +131,133 @@ def test_onboard_json_format_emits_a_parseable_document(capsys, monkeypatch):
     doc = _json.loads(out)  # must parse
     assert doc["schema_version"] == "1.0"
     assert doc["exit_code"] == code == 0
+
+
+def test_passing_check_with_an_issue_renders_a_dim_note():
+    # A PASS can still carry a heads-up issue (a fine-tick market that works but
+    # is bitten by #99 in prod). The note and its issue URL must render.
+    from polymarket_doctor import issues
+    from polymarket_doctor.core.check import Finding
+    from polymarket_doctor.core.runner import Outcome, RunReport
+    from polymarket_doctor.render.terminal import TerminalReport
+
+    report = RunReport()
+    check = next(iter(default_registry()))
+    report.outcomes.append(Outcome(
+        check, Finding.ok("works, but watch out", detail="a caveat",
+                          issue=issues.FINE_TICK_REJECTED), 1.0))
+
+    console = Console(record=True, width=100, file=io.StringIO())
+    TerminalReport(console).render(report, host="https://example.test")
+    out = console.export_text()
+    assert "a caveat" in out
+    assert "py-clob-client-v2#99" in out
+
+
+def test_pending_stages_render_when_some_stage_is_unimplemented(monkeypatch):
+    # All eight stages ship today, so the "not implemented" rendering is dead
+    # unless a stage is pulled back. Simulate that to prove the path still works.
+    from polymarket_doctor.core.check import Finding, Stage
+    from polymarket_doctor.core.runner import Outcome, RunReport
+    from polymarket_doctor.render import terminal
+
+    monkeypatch.setattr(terminal, "PENDING_STAGES",
+                        ((Stage.RFQ, "quote submission and last look"),))
+
+    report = RunReport()
+    check = next(iter(default_registry()))
+    report.outcomes.append(Outcome(check, Finding.fail("boom"), 1.0))
+
+    console = Console(record=True, width=100, file=io.StringIO())
+    terminal.TerminalReport(console).render(report, host="https://example.test")
+    out = console.export_text()
+    assert "not implemented" in out
+    assert "not a green light" in out  # the footer caveat returns with pending stages
+
+
+def test_full_credential_flags_build_credentials(monkeypatch):
+    # The accept path of _credentials_from (all three flags present).
+    from polymarket_doctor import cli
+    from polymarket_doctor.core.runner import RunReport
+
+    monkeypatch.setattr(cli.Runner, "run", lambda self, ctx, only=None: RunReport())
+    code = cli.main(["onboard", "--address", "0x" + "1" * 40, "--no-rpc",
+                     "--api-key", "k", "--api-secret", "c2VjcmV0", "--api-passphrase", "p"])
+    assert code == 0
+
+
+def test_onboard_text_format_renders_through_main(monkeypatch, capsys):
+    # The default text path through main() (not the JSON branch).
+    import httpx
+
+    from polymarket_doctor import cli
+    from polymarket_doctor.net.http import HttpxProbe
+
+    def handler(request):
+        if "/version" in str(request.url):
+            return httpx.Response(200, json={"version": 2})
+        return httpx.Response(200, json={})
+
+    original = HttpxProbe.__init__
+
+    def patched(self, *a, **k):
+        original(self, transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(cli.HttpxProbe, "__init__", patched)
+    cli.main(["onboard", "--address", "0x" + "1" * 40, "--no-rpc"])
+    assert "environment" in capsys.readouterr().out
+
+
+def test_verify_order_reads_stdin(monkeypatch, capsys):
+    import io
+    import json as _json
+
+    from polymarket_doctor import cli
+
+    # A minimal order missing fields -> stops at shape, but exercises stdin read.
+    monkeypatch.setattr("sys.stdin", io.StringIO(_json.dumps({"maker": "0x1"})))
+    code = cli.main(["verify-order"])
+    assert code == 1  # rejected (incomplete order), stdin was read
+
+
+def test_unreadable_file_that_is_a_directory_exits_2(tmp_path):
+    code = main(["verify-order", "--file", str(tmp_path)])  # a dir, not a file
+    assert code == 2
+
+
+def test_top_level_guard_maps_interrupt_and_errors(monkeypatch):
+    from polymarket_doctor import cli
+
+    monkeypatch.setattr(cli, "_run", lambda argv: (_ for _ in ()).throw(KeyboardInterrupt()))
+    assert cli.main(["list"]) == 130
+
+    monkeypatch.setattr(cli, "_run", lambda argv: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert cli.main(["list"]) == 2
+
+
+def test_broken_pipe_exits_zero_without_erroring(monkeypatch):
+    # The guard closes stdout on a broken pipe; give it a throwaway so it
+    # doesn't close pytest's captured stream.
+    import io
+
+    from polymarket_doctor import cli
+
+    monkeypatch.setattr("sys.stdout", io.StringIO())
+    monkeypatch.setattr(cli, "_run", lambda argv: (_ for _ in ()).throw(BrokenPipeError()))
+    assert cli.main(["list"]) == 0
+
+
+def test_module_entrypoints_run(monkeypatch):
+    # __main__.py and cli.py's `if __name__ == "__main__"` guard. runpy executes
+    # them in-process (so coverage counts the lines); both call sys.exit(main()).
+    import runpy
+    import sys
+
+    for target in ("polymarket_doctor", "polymarket_doctor.cli"):
+        monkeypatch.setattr("sys.argv", [target, "list"])
+        # Drop it from the module cache so runpy executes it fresh without the
+        # "already imported" RuntimeWarning.
+        sys.modules.pop(target, None)
+        with pytest.raises(SystemExit) as exit_:
+            runpy.run_module(target, run_name="__main__")
+        assert exit_.value.code == 0

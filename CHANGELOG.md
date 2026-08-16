@@ -20,6 +20,9 @@ breaking change to the machine-readable shape.
   sending it, including EIP-712 signer recovery.
 - `py.typed` marker so downstream type checkers see the annotations.
 
+### Testing
+- 100% line coverage, enforced in CI (--cov-fail-under=100).
+
 ### Fixed
 - `verify-order` no longer crashes on a malformed-but-present field (for example
   a hex-encoded `salt`); it reports a finding instead.

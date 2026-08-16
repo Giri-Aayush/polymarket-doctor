@@ -24,8 +24,8 @@ jobs:
 
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      # Fail the build if coverage regresses below the current floor.
-      - run: pytest --cov=polymarket_doctor --cov-report=term-missing --cov-fail-under=90
+      # The suite covers every line; hold it there.
+      - run: pytest --cov=polymarket_doctor --cov-report=term-missing --cov-fail-under=100
 
   build:
     runs-on: ubuntu-latest

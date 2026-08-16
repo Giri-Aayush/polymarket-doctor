@@ -252,3 +252,86 @@ def test_cli_verify_order_token_fetches_real_tick_and_neg_risk(tmp_path, capsys,
     assert doc["exchange"] == "neg-risk"  # picked up from the live neg-risk flag
     price = next(c for c in doc["checks"] if c["name"] == "price")
     assert price["severity"] == "fail"  # graded against the fetched 0.01 tick
+
+
+# --- edge branches, driven to 100% coverage of order_verify.py ---
+
+def test_side_that_is_not_buy_or_sell_is_reported():
+    order = signed_order()
+    order["side"] = "MAYBE"
+    assert _by_name(verify_order(order), "side").severity is Severity.FAIL
+
+
+def test_signature_type_out_of_range_is_reported():
+    order = signed_order()
+    order["signatureType"] = 9
+    assert _by_name(verify_order(order), "signature-type").severity is Severity.FAIL
+
+
+def test_a_bad_maker_address_is_reported():
+    order = signed_order()
+    order["maker"] = "not-an-address"
+    assert _by_name(verify_order(order), "addresses").severity is Severity.FAIL
+
+
+def test_non_numeric_amounts_are_reported():
+    order = signed_order()
+    order["makerAmount"] = "abc"
+    assert _by_name(verify_order(order), "amounts").severity is Severity.FAIL
+
+
+def test_sell_side_prices_and_sizes_from_the_right_ratio():
+    # SELL: default 25000/5000000 gives price 200 (out of range) and size 0.025
+    # (sub-minimum) — exercises the SELL price/size branch and the >=1 guard.
+    order = signed_order(side=1)
+    results = verify_order(order, tick_size=Decimal("0.001"))
+    assert _by_name(results, "price").severity is Severity.FAIL
+    assert _by_name(results, "size").severity is Severity.FAIL
+
+
+def test_a_numeric_side_field_still_recovers():
+    # side as "0" (not "BUY") must parse through both use sites and still verify.
+    order = signed_order()
+    order["side"] = "0"
+    assert _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature").severity \
+        is Severity.PASS
+
+
+def test_a_hex_encoded_field_that_is_garbage_is_a_finding_not_a_crash():
+    order = signed_order()
+    order["salt"] = "not-a-number"
+    sig = _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature")
+    assert sig.severity is Severity.FAIL
+    assert "well-formed" in sig.summary
+
+
+def test_a_boolean_field_is_rejected_not_coerced():
+    order = signed_order()
+    order["salt"] = True  # bool is an int subclass; must not be treated as 1
+    assert _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature").severity \
+        is Severity.FAIL
+
+
+def test_a_garbage_signature_string_is_reported():
+    order = signed_order()
+    order["signature"] = "0xdead"
+    sig = _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature")
+    assert sig.severity is Severity.FAIL
+    assert "could not be recovered" in sig.summary
+
+
+def test_a_bytes32_field_of_the_wrong_length_is_rejected():
+    order = signed_order()
+    order["metadata"] = "0xff"  # one byte, not 32 — but zfill pads it, so use >32
+    order["metadata"] = "0x" + "ab" * 33  # 33 bytes, too long
+    assert _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature").severity \
+        is Severity.FAIL
+
+
+def test_a_hex_encoded_salt_is_accepted_and_still_recovers():
+    # salt "0x1" == the signed salt 1, so a hex-serialized field verifies. This
+    # is the exact input that used to crash the tool.
+    order = signed_order()
+    order["salt"] = "0x1"
+    assert _by_name(verify_order(order, tick_size=Decimal("0.001")), "signature").severity \
+        is Severity.PASS

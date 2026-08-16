@@ -357,8 +357,8 @@ discover:
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test, not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each one, with the command to reproduce it: 180 tests, CI green on Python
-3.10 through 3.13, side-by-side `curl`-versus-tool measurements, and the live
+for each one, with the command to reproduce it: 238 tests, CI green on Python
+3.10 through 3.13, 100% line coverage,, side-by-side `curl`-versus-tool measurements, and the live
 rejection contracts (`maker address not allowed…`, the RFQ HMAC error) captured
 without ever placing an order. What the tool deliberately does not verify is
 listed there too: a successful fill, a live quote, and the still-open #70 root

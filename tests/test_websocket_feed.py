@@ -198,3 +198,38 @@ class TestSkip:
         # considered and had nothing to work with.
         assert Fact.WS_CONNECTED in ctx.facts
         assert ctx.facts.get(Fact.WS_CONNECTED) is None
+
+
+def test_a_stalled_handshake_times_out_and_fails():
+    # A raw TCP server that accepts the connection but never completes the
+    # WebSocket handshake — the exact "proxy won't pass Upgrade" case. The
+    # connect wait_for fires and the stage fails cleanly.
+    import socket as _socket
+
+    listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    listener.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    held = []
+
+    def accept_and_hold():
+        try:
+            conn, _ = listener.accept()
+            held.append(conn)  # keep it open, send nothing
+        except OSError:
+            pass
+
+    thread = threading.Thread(target=accept_and_hold, daemon=True)
+    thread.start()
+    try:
+        ctx = context_for(port)
+        finding = MarketFeed(connect_timeout=0.2, first_message_timeout=0.2).run(ctx)
+        assert finding.severity is Severity.FAIL
+        assert "handshake timed out" in finding.summary
+        assert ctx.facts.get(Fact.WS_CONNECTED) is False
+    finally:
+        for conn in held:
+            conn.close()
+        listener.close()
+        thread.join(timeout=1)
