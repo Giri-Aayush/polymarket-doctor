@@ -80,22 +80,33 @@ def _check(outcome: Outcome) -> dict[str, Any]:
     return entry
 
 
-def _safe(value: Any) -> Any:
+def _safe(value: Any, _seen: frozenset[int] = frozenset()) -> Any:
     """Coerce anything a check stored into JSON-friendly values.
 
     Facts and evidence can hold IntEnums (signature types), dataclasses
-    (contract profiles), and nested dicts. None of them are JSON out of the box,
-    and a str() fallback keeps a novel value from ever crashing the report.
-    Secrets never reach here: credentials are redacted at the Finding boundary.
+    (contract profiles), bytes (a bytes32 metadata field), and nested dicts.
+    None of them are JSON out of the box, and the goal is that a novel value
+    never crashes the report a market maker is parsing. Secrets never reach
+    here: credentials are redacted at the Finding boundary.
+
+    `_seen` tracks container ids down the current branch so a self-referential
+    structure becomes a placeholder instead of a RecursionError.
     """
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
+    if isinstance(value, (bytes, bytearray)):
+        # Hex, not Python's repr, so it round-trips for a consumer.
+        return "0x" + bytes(value).hex()
     if isinstance(value, Enum):
         return value.value
+    if id(value) in _seen:
+        return "<circular>"
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _safe(dataclasses.asdict(value))
+        return _safe(dataclasses.asdict(value), _seen | {id(value)})
     if isinstance(value, dict):
-        return {str(k): _safe(v) for k, v in value.items()}
+        branch = _seen | {id(value)}
+        return {str(k): _safe(v, branch) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_safe(v) for v in value]
+        branch = _seen | {id(value)}
+        return [_safe(v, branch) for v in value]
     return str(value)

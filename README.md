@@ -112,8 +112,10 @@ Run a single gate and it pulls in whatever it depends on:
 polymarket-doctor check auth.key-identity
 ```
 
-Exit code is `1` on a blocking failure and `0` otherwise, so it drops into CI. A
-warning never fails the run.
+Exit codes are a stable contract, so a pipeline can branch on them: `0` all
+clear, `1` a blocking failure (the integration isn't ready), `2` a usage error
+(a bad flag, an unreadable file, missing credentials). A warning never fails the
+run.
 
 ### Verify an order your own code produced
 
@@ -173,7 +175,10 @@ polymarket-doctor onboard --funder 0xYourWallet --format json | jq '.ok'
 ```
 
 The `schema_version` only changes for a breaking change to the shape, so a
-parser can rely on it. Secrets never appear in the document; a test fails the
+parser can rely on it. The **stable** fields are the top-level `ok`,
+`exit_code`, `summary`, and each check's `id`/`severity`/`summary`/`issue`. The
+`facts` and `evidence` blocks are best-effort context and may gain fields, so
+gate on the stable set. Secrets never appear in the document; a test fails the
 build if they do.
 
 **Embed it, don't shell out.** The same run is available as a library call, so
@@ -352,7 +357,7 @@ discover:
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test, not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each one, with the command to reproduce it: 164 tests, CI green on Python
+for each one, with the command to reproduce it: 180 tests, CI green on Python
 3.10 through 3.13, side-by-side `curl`-versus-tool measurements, and the live
 rejection contracts (`maker address not allowed…`, the RFQ HMAC error) captured
 without ever placing an order. What the tool deliberately does not verify is

@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import IntEnum
+from typing import Any
 
 from eth_account import Account
 from eth_account.messages import encode_typed_data
@@ -242,6 +243,35 @@ def _check_signature(order: dict, sig_type: SignatureType, maker: str,
         )
 
     verifying_contract = NEG_RISK_EXCHANGE_V2 if neg_risk else EXCHANGE_V2
+
+    # Build the EIP-712 message. Order builders serialize the 256-bit fields
+    # differently (salt as a decimal string, a hex string, or a JSON number),
+    # so parse tolerantly and turn any genuinely malformed field into a
+    # finding rather than a traceback. This is a diagnostic; a bad order is
+    # data, not a crash.
+    try:
+        message = {
+            "salt": _as_int(order["salt"]),
+            "maker": maker,
+            "signer": signer,
+            "tokenId": _as_int(order["tokenId"]),
+            "makerAmount": _as_int(order["makerAmount"]),
+            "takerAmount": _as_int(order["takerAmount"]),
+            "side": _side_value(order["side"]),
+            "signatureType": _as_int(order["signatureType"]),
+            "timestamp": _as_int(order["timestamp"]),
+            "metadata": _bytes32(order["metadata"]),
+            "builder": _bytes32(order["builder"]),
+        }
+    except (ValueError, KeyError) as exc:
+        return Finding.fail(
+            "order fields are not well-formed enough to hash",
+            detail=f"{exc}. salt, tokenId and timestamp must be integers "
+                   "(decimal or 0x-hex); metadata and builder must be bytes32 "
+                   "hex. This usually points at how your builder serializes "
+                   "those fields, not at the signature.",
+        )
+
     typed = {
         "primaryType": "Order",
         "types": {
@@ -259,20 +289,7 @@ def _check_signature(order: dict, sig_type: SignatureType, maker: str,
             "chainId": CHAIN_ID,
             "verifyingContract": verifying_contract,
         },
-        "message": {
-            "salt": int(order["salt"]),
-            "maker": maker,
-            "signer": signer,
-            "tokenId": int(order["tokenId"]),
-            "makerAmount": int(order["makerAmount"]),
-            "takerAmount": int(order["takerAmount"]),
-            "side": int(order["side"]) if str(order["side"]).isdigit()
-            else Side[str(order["side"]).upper()].value,
-            "signatureType": int(order["signatureType"]),
-            "timestamp": int(order["timestamp"]),
-            "metadata": _bytes32(order["metadata"]),
-            "builder": _bytes32(order["builder"]),
-        },
+        "message": message,
     }
 
     try:
@@ -293,7 +310,7 @@ def _check_signature(order: dict, sig_type: SignatureType, maker: str,
             "signature recovers to the wrong address",
             detail=f"Recovered {_short(recovered)}, but the order names "
                    f"{_short(signer)} as signer. The signature is valid but "
-                   "over a different key or a different order — a mismatched "
+                   "over a different key or a different order. A mismatched "
                    "verifyingContract (neg-risk vs standard) does exactly this.",
             remedy="Sign with the signer's key against the matching exchange "
                    "contract; pass --neg-risk for neg-risk markets.",
@@ -312,8 +329,35 @@ def _checksum(address: str) -> str | None:
     return to_checksum_address(address.strip())
 
 
+def _as_int(value: Any) -> int:
+    """Parse a 256-bit field. Accepts an int, a decimal string, or 0x-hex.
+
+    Raises ValueError on anything else, which the caller turns into a finding.
+    """
+    if isinstance(value, bool):  # bool is an int subclass; reject it explicitly
+        raise ValueError(f"expected an integer, got boolean {value!r}")
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.lower().startswith("0x"):
+        return int(text, 16)
+    return int(text)
+
+
+def _side_value(value: Any) -> int:
+    """Accept BUY/SELL either as the enum's 0/1 or as the string name."""
+    text = str(value).strip()
+    if text.isdigit():
+        return Side(int(text)).value
+    return Side[text.upper()].value
+
+
 def _bytes32(value: str) -> bytes:
-    return bytes.fromhex(str(value).replace("0x", "").zfill(64))
+    """Parse a bytes32 hex field into exactly 32 bytes, or raise ValueError."""
+    raw = bytes.fromhex(str(value).replace("0x", "").zfill(64))
+    if len(raw) != 32:
+        raise ValueError(f"bytes32 field is {len(raw)} bytes, not 32: {value!r}")
+    return raw
 
 
 def _short(address: str) -> str:

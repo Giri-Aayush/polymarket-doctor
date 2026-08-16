@@ -184,3 +184,71 @@ def test_cli_verify_order_rejects_unparseable_json(tmp_path):
     junk = tmp_path / "junk.json"
     junk.write_text("not json")
     assert main(["verify-order", "--file", str(junk)]) == 2
+
+
+def test_cli_verify_order_json_output(tmp_path, capsys):
+    import json
+
+    from polymarket_doctor.cli import main
+
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(signed_order()))
+    code = main(["verify-order", "--file", str(good), "--format", "json"])
+    doc = json.loads(capsys.readouterr().out)
+
+    assert doc["schema_version"] == "1.0"
+    assert doc["command"] == "verify-order"
+    assert doc["ok"] is True and doc["exit_code"] == code == 0
+    assert any(c["name"] == "signature" and c["severity"] == "pass" for c in doc["checks"])
+
+
+def test_cli_verify_order_json_flags_a_rejected_order(tmp_path, capsys):
+    import json
+
+    from polymarket_doctor.cli import main
+
+    bad = tmp_path / "bad.json"
+    order = signed_order()
+    order["makerAmount"] = "26000"  # tamper after signing
+    bad.write_text(json.dumps(order))
+    code = main(["verify-order", "--file", str(bad), "--format", "json"])
+    doc = json.loads(capsys.readouterr().out)
+
+    assert doc["ok"] is False and doc["exit_code"] == code == 1
+    assert any(c["severity"] == "fail" for c in doc["checks"])
+
+
+def test_cli_verify_order_token_fetches_real_tick_and_neg_risk(tmp_path, capsys, monkeypatch):
+    # --token replaces inference with live /tick-size and /neg-risk. Stub the
+    # probe so it's offline but the branch runs.
+    import json as _json
+
+    import httpx
+
+    from polymarket_doctor import cli
+    from polymarket_doctor.net.http import HttpxProbe
+
+    def handler(request):
+        url = str(request.url)
+        if "/tick-size" in url:
+            return httpx.Response(200, json={"minimum_tick_size": "0.01"})
+        if "/neg-risk" in url:
+            return httpx.Response(200, json={"neg_risk": True})
+        return httpx.Response(404, json={})
+
+    original = HttpxProbe.__init__
+
+    def patched(self, *a, **k):
+        original(self, transport=httpx.MockTransport(handler))
+
+    monkeypatch.setattr(cli.HttpxProbe, "__init__", patched)
+
+    order = tmp_path / "o.json"
+    order.write_text(_json.dumps(signed_order(maker_amount=1600, taker_amount=5000000)))
+    # 1600/5_000_000 = 0.00032, off the 0.01 grid the token reports -> price fails.
+    cli.main(["verify-order", "--file", str(order), "--token", "123", "--format", "json"])
+    doc = _json.loads(capsys.readouterr().out)
+
+    assert doc["exchange"] == "neg-risk"  # picked up from the live neg-risk flag
+    price = next(c for c in doc["checks"] if c["name"] == "price")
+    assert price["severity"] == "fail"  # graded against the fetched 0.01 tick

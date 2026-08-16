@@ -8,6 +8,7 @@ help text says so.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import difflib
 import json
 import os
@@ -149,7 +150,10 @@ def _credentials_from(args: argparse.Namespace) -> Credentials | None:
              ("--api-passphrase", args.api_passphrase))
             if not value
         ]
-        raise SystemExit(f"incomplete credentials, missing: {', '.join(missing)}")
+        # Usage error, so exit 2 (SystemExit with a non-int would print and
+        # exit 1, colliding with the blocking-failure code).
+        print(f"incomplete credentials, missing: {', '.join(missing)}", file=sys.stderr)
+        raise SystemExit(2)
     return Credentials(*parts)
 
 
@@ -163,8 +167,14 @@ def _verify_order(args: argparse.Namespace, console: Console) -> int:
     if args.file == "-":
         raw = sys.stdin.read()
     else:
-        with open(args.file) as handle:
-            raw = handle.read()
+        try:
+            with open(args.file) as handle:
+                raw = handle.read()
+        except OSError as exc:
+            # A fat-fingered path is a usage error (exit 2), not a rejected
+            # order (exit 1) — a consumer must be able to tell them apart.
+            print(f"could not read {args.file}: {exc.strerror or exc}", file=sys.stderr)
+            return 2
     try:
         order = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -238,6 +248,30 @@ def _verify_order(args: argparse.Namespace, console: Console) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Entry point with a top-level guard so nothing reaches the user as a
+    traceback. Ctrl-C exits 130, a broken pipe exits quietly, and any
+    unexpected error becomes a one-line message with exit 2."""
+    try:
+        return _run(argv)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return 130
+    except BrokenPipeError:
+        # The reader (a `| head`, say) went away. Silence the flush error that
+        # Python would otherwise raise at shutdown, and exit.
+        with contextlib.suppress(Exception):
+            sys.stdout.close()
+        return 0
+    except SystemExit as exit_:
+        # argparse and our own usage errors raise SystemExit; honor the code.
+        return exit_.code if isinstance(exit_.code, int) else 2
+    except Exception as exc:  # noqa: BLE001 - last resort, never a stack trace
+        print(f"polymarket-doctor: unexpected error: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return 2
+
+
+def _run(argv: Sequence[str] | None) -> int:
     args = build_parser().parse_args(argv)
     console = Console()
 

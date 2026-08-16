@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "polymarket-doctor"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Preflight diagnostics for Polymarket integrations"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -19,7 +19,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
 ]
 
 # Kept deliberately small. This runs on a market maker's trading host, and the
@@ -46,6 +48,11 @@ polymarket-doctor = "polymarket_doctor.cli:main"
 [project.urls]
 Homepage = "https://github.com/Giri-Aayush/polymarket-doctor"
 Issues = "https://github.com/Giri-Aayush/polymarket-doctor/issues"
+Changelog = "https://github.com/Giri-Aayush/polymarket-doctor/blob/main/CHANGELOG.md"
+
+# Single source of truth for the version: __version__ in the package.
+[tool.hatch.version]
+path = "src/polymarket_doctor/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/polymarket_doctor"]

@@ -40,9 +40,12 @@ def test_list_command_exits_clean(capsys):
     assert "env.reachable" in capsys.readouterr().out
 
 
-def test_partial_credentials_are_rejected_before_any_request():
-    with pytest.raises(SystemExit, match="--api-passphrase"):
-        main(["onboard", "--address", "0x" + "1" * 40, "--api-key", "k", "--api-secret", "s"])
+def test_partial_credentials_are_rejected_before_any_request(capsys):
+    # Usage error: exit 2 with a message on stderr, not a traceback and not
+    # the exit-1 that means "integration broken".
+    code = main(["onboard", "--address", "0x" + "1" * 40, "--api-key", "k", "--api-secret", "s"])
+    assert code == 2
+    assert "--api-passphrase" in capsys.readouterr().err
 
 
 def test_secret_flag_help_steers_at_the_environment():
@@ -67,14 +70,17 @@ class TestTerminalRender:
         return report
 
     @pytest.mark.parametrize("finding", [
-        Finding.ok("fine"),
-        Finding.warn("hmm", detail="because", remedy="do this"),
-        Finding.fail("broken", detail="because", remedy="do that"),
-        Finding(Severity.SKIP, "skipped"),
+        Finding.ok("a-passing-summary"),
+        Finding.warn("a-warning-summary", detail="because", remedy="do this"),
+        Finding.fail("a-failing-summary", detail="because", remedy="do that"),
+        Finding(Severity.SKIP, "a-skipped-summary"),
     ])
     def test_renders_each_severity(self, finding):
-        console = Console(file=io.StringIO(), width=100)
+        # Don't just assert it didn't crash: the summary must actually appear,
+        # or a renderer that silently dropped a severity would ship green.
+        console = Console(record=True, width=100, file=io.StringIO())
         TerminalReport(console).render(self._report(finding), host="https://example.test")
+        assert finding.summary in console.export_text()
 
     def test_failure_output_carries_remedy_and_issue(self):
         from polymarket_doctor import issues

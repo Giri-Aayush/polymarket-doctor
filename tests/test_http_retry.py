@@ -72,3 +72,28 @@ def test_posts_are_never_retried():
         response = probe.post("https://x.test/order", json_body={})
     assert response.status == 503
     assert calls["n"] == 1
+
+
+def test_transport_error_then_5xx_then_success_all_retried():
+    # The two retry triggers in one sequence, which the isolated tests missed.
+    probe, _ = _probe([httpx.ConnectError("refused"), 503, 200], retries=2)
+    with probe:
+        response = probe.get("https://x.test/thing")
+    assert response.ok
+    assert response.attempts == 3
+
+
+def test_non_json_body_is_returned_as_truncated_text():
+    # Cloudflare/nginx HTML error pages: a check relies on getting text, not a
+    # JSON-decode crash.
+    html = "<html>" + "x" * 1000 + "</html>"
+
+    def handler(request):
+        return httpx.Response(503, text=html)
+
+    probe = HttpxProbe(retries=0, transport=httpx.MockTransport(handler),
+                       sleep=lambda _s: None)
+    with probe:
+        response = probe.get("https://x.test/thing")
+    assert isinstance(response.body, str)
+    assert len(response.body) <= 500

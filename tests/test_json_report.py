@@ -104,3 +104,22 @@ def test_issue_citation_is_rendered_with_state(make_context):
     assert issue["slug"] == "py-clob-client-v2#108"
     assert issue["url"].endswith("/108")
     assert issue["state"] in ("open", "closed")
+
+
+def test_safe_coerces_bytes_plain_enums_and_cycles():
+    # The three cases the direct tests missed: bytes -> hex, a non-int Enum,
+    # and a self-referential container that must not RecursionError.
+    from polymarket_doctor.core.check import Stage  # a plain (int) Enum is Stage
+    from polymarket_doctor.render.json_report import _safe
+
+    assert _safe(b"\x00\x01\xff") == "0x0001ff"
+    assert _safe(Stage.AUTH) == Stage.AUTH.value
+
+    cycle: dict = {}
+    cycle["self"] = cycle
+    out = _safe(cycle)
+    assert out["self"] == "<circular>"
+    json.dumps(out)  # must be serializable
+
+    deep = {"a": [{"b": (1, b"\x2a")}]}
+    assert _safe(deep) == {"a": [{"b": [1, "0x2a"]}]}

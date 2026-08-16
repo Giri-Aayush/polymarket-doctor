@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import sys
 
 HOST = "https://clob.polymarket.com"
@@ -72,8 +73,10 @@ def main() -> None:
     try:
         client = ClobClient(host=HOST, chain_id=POLYGON, key=key)
         address = client.get_address()
-    except Exception as exc:  # noqa: BLE001 - report, never traceback
-        fail(f"the SDK rejected the key: {exc}")
+    except Exception:  # noqa: BLE001 - report, never echo the key back
+        # Deliberately not interpolating the exception: a third-party library's
+        # error string could contain the private key that was passed to it.
+        fail("the SDK rejected the key. Re-check it is a valid 0x + 64 hex key.")
     print(f"deriving credentials for {address} against {HOST} …", file=sys.stderr)
 
     try:
@@ -85,11 +88,14 @@ def main() -> None:
             "(py-clob-client-v2#41) — retry from a residential connection."
         )
 
+    # shlex.quote so a value containing a quote, backtick, or $() can't break
+    # out of the string the caller evals. Real credentials are base64/uuid
+    # shaped, but eval of unescaped server output is an injection primitive.
     print("done. credentials are bound to the address above.", file=sys.stderr)
-    print(f'export POLYMARKET_ADDRESS="{address}"')
-    print(f'export POLYMARKET_API_KEY="{creds.api_key}"')
-    print(f'export POLYMARKET_API_SECRET="{creds.api_secret}"')
-    print(f'export POLYMARKET_API_PASSPHRASE="{creds.api_passphrase}"')
+    print(f"export POLYMARKET_ADDRESS={shlex.quote(address)}")
+    print(f"export POLYMARKET_API_KEY={shlex.quote(creds.api_key)}")
+    print(f"export POLYMARKET_API_SECRET={shlex.quote(creds.api_secret)}")
+    print(f"export POLYMARKET_API_PASSPHRASE={shlex.quote(creds.api_passphrase)}")
 
 
 if __name__ == "__main__":

@@ -24,4 +24,25 @@ jobs:
 
       - run: pip install -e ".[dev]"
       - run: ruff check .
-      - run: pytest --cov=polymarket_doctor --cov-report=term-missing
+      # Fail the build if coverage regresses below the current floor.
+      - run: pytest --cov=polymarket_doctor --cov-report=term-missing --cov-fail-under=90
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Confirm the wheel builds and ships py.typed, so downstreams get the hints.
+      - run: pip install build
+      - run: python -m build
+      - run: |
+          python - <<'PY'
+          import zipfile, glob
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          assert any(n.endswith("polymarket_doctor/py.typed") for n in names), \
+              "py.typed missing from the wheel"
+          print("wheel ok:", wheel)
+          PY
