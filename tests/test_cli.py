@@ -261,3 +261,62 @@ def test_module_entrypoints_run(monkeypatch):
         with pytest.raises(SystemExit) as exit_:
             runpy.run_module(target, run_name="__main__")
         assert exit_.value.code == 0
+
+
+def test_interactive_prompt_fills_a_missing_address(monkeypatch):
+    # At a terminal with no --address, the tool asks instead of failing.
+    from polymarket_doctor import cli
+    from polymarket_doctor.core.runner import RunReport
+
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    answers = iter(["0x" + "1" * 40, ""])  # signer, then blank funder
+    monkeypatch.setattr(Console, "input", lambda self, *a, **k: next(answers))
+
+    captured = {}
+
+    def fake_run(self, ctx, only=None):
+        captured["signer"] = ctx.signer_address
+        return RunReport()
+
+    monkeypatch.setattr(cli.Runner, "run", fake_run)
+    assert cli.main(["onboard", "--no-rpc"]) == 0
+    assert captured["signer"] == "0x" + "1" * 40
+
+
+def test_no_prompt_when_not_interactive(monkeypatch):
+    # A pipeline (no tty) must never block on input; it fails cleanly instead.
+    from polymarket_doctor import cli
+
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+
+    def boom(self, *a, **k):
+        raise AssertionError("must not prompt in a pipeline")
+
+    monkeypatch.setattr(Console, "input", boom)
+    assert cli.main(["onboard", "--no-rpc"]) == 1  # stage-1 failure, no hang
+
+
+def test_is_interactive_reflects_tty(monkeypatch):
+    from polymarket_doctor import cli
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    assert cli._is_interactive() is True
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    assert cli._is_interactive() is False
+
+
+def test_prompt_reads_an_explicit_funder_too(monkeypatch):
+    from polymarket_doctor import cli
+    from polymarket_doctor.core.runner import RunReport
+
+    monkeypatch.setattr(cli, "_is_interactive", lambda: True)
+    answers = iter(["0x" + "a" * 40, "0x" + "b" * 40])
+    monkeypatch.setattr(Console, "input", lambda self, *a, **k: next(answers))
+
+    captured = {}
+    monkeypatch.setattr(cli.Runner, "run",
+                        lambda self, ctx, only=None: captured.update(
+                            funder=ctx.funder_address) or RunReport())
+    cli.main(["onboard", "--no-rpc"])
+    assert captured["funder"] == "0x" + "b" * 40

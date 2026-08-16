@@ -76,7 +76,18 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 ## Use
 
-An address is enough for the environment and identity stages:
+Run it with no arguments and it asks for the wallet to check:
+
+```console
+$ polymarket-doctor onboard
+No --address given. Enter one to check (public info, Ctrl-C to cancel).
+  signer address: 0x…
+  funder address (blank if same as signer): 0x…
+```
+
+The prompt only appears at an interactive terminal, so a pipeline or CI never
+blocks on it. Everywhere else, pass the address as a flag. An address alone is
+enough for the environment and identity stages:
 
 ```bash
 polymarket-doctor onboard --address 0xYourWallet
@@ -361,7 +372,7 @@ discover:
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test, not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each one, with the command to reproduce it: 238 tests at 100% line coverage,
+for each one, with the command to reproduce it: 242 tests at 100% line coverage,
 CI green on Python 3.10 through 3.13, side-by-side `curl`-versus-tool
 measurements, and the live rejection contracts (`maker address not allowed…`,
 the RFQ HMAC error) captured without ever placing an order. What the tool

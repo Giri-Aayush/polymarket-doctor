@@ -247,6 +247,27 @@ def _verify_order(args: argparse.Namespace, console: Console) -> int:
     return 1 if failed else 0
 
 
+def _is_interactive() -> bool:
+    """True only at a real terminal, so pipelines and CI never hit a prompt."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _prompt_for_addresses(console: Console, funder: str | None) -> tuple[str | None, str | None]:
+    """Ask for the signer (and optional funder) when none was passed.
+
+    Addresses are public, so prompting for them is fine. Credentials are not
+    prompted here; those stay in the environment where they can't be shoulder-
+    surfed or land in a scrollback.
+    """
+    console.print("No --address given. Enter one to check (public info, "
+                  "Ctrl-C to cancel).", style="bright_black")
+    address = console.input("  signer address: ").strip() or None
+    if funder is None:
+        entered = console.input("  funder address (blank if same as signer): ").strip()
+        funder = entered or None
+    return address, funder
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point with a top-level guard so nothing reaches the user as a
     traceback. Ctrl-C exits 130, a broken pipe exits quietly, and any
@@ -285,6 +306,11 @@ def _run(argv: Sequence[str] | None) -> int:
 
     endpoints = Endpoints(clob=args.host) if args.host else Endpoints()
     registry = default_registry()
+
+    # No address on an interactive terminal: ask for it instead of failing.
+    # Guarded on isatty so a pipeline or CI never blocks on a prompt.
+    if args.address is None and args.format == "text" and _is_interactive():
+        args.address, args.funder = _prompt_for_addresses(console, args.funder)
 
     if args.command == "check":
         known = sorted(check.id for check in registry)
