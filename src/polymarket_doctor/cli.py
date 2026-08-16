@@ -14,6 +14,7 @@ import sys
 from collections.abc import Sequence
 
 from rich.console import Console
+from rich.text import Text
 
 from . import __version__
 from .checks import default_registry
@@ -47,6 +48,26 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("check_id", help="id from `polymarket-doctor list`")
     _add_account_args(check)
     _add_transport_args(check)
+
+    verify = sub.add_parser(
+        "verify-order",
+        help="validate a signed order your code produced, without sending it",
+    )
+    verify.add_argument(
+        "--file", default="-",
+        help="signed order JSON (the POST /order body, or the order object); "
+             "'-' or omitted reads stdin",
+    )
+    verify.add_argument(
+        "--neg-risk", action="store_true",
+        help="the market is neg-risk (selects the neg-risk exchange contract)",
+    )
+    verify.add_argument(
+        "--token", default=None,
+        help="token id; when given, the market's real tick and neg-risk flag "
+             "are fetched live instead of inferred",
+    )
+    verify.add_argument("--timeout", type=float, default=12.0)
 
     sub.add_parser("list", help="show every registered check in run order")
     return parser
@@ -118,6 +139,70 @@ def _credentials_from(args: argparse.Namespace) -> Credentials | None:
     return Credentials(*parts)
 
 
+def _verify_order(args: argparse.Namespace, console: Console) -> int:
+    """Validate a signed order from a file or stdin. Read-only throughout."""
+    import json
+    from decimal import Decimal
+
+    from .core.check import Severity
+    from .order_verify import verify_order
+
+    if args.file == "-":
+        raw = sys.stdin.read()
+    else:
+        with open(args.file) as handle:
+            raw = handle.read()
+    try:
+        order = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"could not parse order JSON: {exc}", file=sys.stderr)
+        return 2
+
+    neg_risk = args.neg_risk
+    tick: Decimal | None = None
+    # A token id lets us replace inference with the market's real tick and
+    # neg-risk flag — one GET each, no auth.
+    if args.token:
+        with HttpxProbe(timeout=args.timeout) as probe:
+            endpoints = Endpoints()
+            ts = probe.get(endpoints.clob_url("/tick-size"), params={"token_id": args.token})
+            nr = probe.get(endpoints.clob_url("/neg-risk"), params={"token_id": args.token})
+            if isinstance(ts.body, dict) and "minimum_tick_size" in ts.body:
+                tick = Decimal(str(ts.body["minimum_tick_size"]))
+            if isinstance(nr.body, dict) and "neg_risk" in nr.body:
+                neg_risk = bool(nr.body["neg_risk"])
+
+    results = verify_order(order, neg_risk=neg_risk, tick_size=tick)
+
+    console.print()
+    console.print(Text("Order verification", style="bold"),
+                  Text(f"   {'neg-risk' if neg_risk else 'standard'} exchange",
+                       style="bright_black"))
+    console.print()
+    glyph = {Severity.PASS: ("✓", "green"), Severity.WARN: ("!", "yellow"),
+             Severity.FAIL: ("✗", "red"), Severity.SKIP: ("·", "bright_black")}
+    for result in results:
+        mark, colour = glyph[result.finding.severity]
+        line = Text("  ")
+        line.append(f"{mark} ", style=colour)
+        line.append(result.finding.summary)
+        console.print(line)
+        for extra in (result.finding.detail, result.finding.remedy):
+            if extra:
+                label = "Fix: " if extra is result.finding.remedy else ""
+                console.print(Text(f"      {label}{extra}", style="bright_black"))
+    console.print()
+
+    failed = any(r.finding.severity is Severity.FAIL for r in results)
+    console.print(Text(" This order would be rejected." if failed
+                       else " No blocking problems found in this order.",
+                       style="bold red" if failed else "bold green"))
+    console.print(Text(" Structural and signature checks only — nothing was sent.",
+                       style="bright_black"))
+    console.print()
+    return 1 if failed else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     console = Console()
@@ -126,6 +211,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for check in default_registry().resolve():
             console.print(f"  {check.stage.value}  {check.id:<26} {check.title}")
         return 0
+
+    if args.command == "verify-order":
+        return _verify_order(args, console)
 
     endpoints = Endpoints(clob=args.host) if args.host else Endpoints()
     registry = default_registry()

@@ -31,6 +31,9 @@ dependencies = [
     # need one. Without it is_address raises ImportError at first use.
     "eth-utils>=4.1",
     "eth-hash[pycryptodome]>=0.7",
+    # verify-order recovers the signer from an EIP-712 order signature. eth-account
+    # is the canonical library for that and ships with every Polymarket SDK anyway.
+    "eth-account>=0.11",
     "websockets>=12",
 ]
 

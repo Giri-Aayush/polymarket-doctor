@@ -114,6 +114,32 @@ polymarket-doctor check auth.key-identity
 Exit code is `1` on a blocking failure and `0` otherwise, so it drops into CI. A
 warning never fails the run.
 
+### Verify an order your own code produced
+
+`onboard` checks that your *account* is ready. `verify-order` checks the other
+half — that a signed order **your code built** is one the exchange will accept —
+by running the server's own validations against it and **never sending it**:
+
+```bash
+your-bot --dump-signed-order | polymarket-doctor verify-order --token <token-id>
+```
+
+It recovers the signer from the EIP-712 signature (does your signing actually
+work?), confirms the signature type matches your funder, and checks the tick
+grid, minimum size, and base-unit math. For a market order that would otherwise
+be rejected with a bare `400`, this tells you *which* invariant broke:
+
+```console
+  ✓ signature recovers to signer 0x19E7…ff2A
+  ✗ price 0.0050002 is off the 0.001 tick grid
+      On 0.001-tick markets this is usually a taker amount computed with 5
+      decimals instead of 6.
+```
+
+It accepts either the full `POST /order` body or the bare order object, from a
+file (`--file`) or stdin. `signatureType 3` (deposit-wallet / EIP-1271) can only
+be verified on-chain, and the tool says so rather than guessing.
+
 ## The eight stages
 
 | # | Stage | What it answers |
@@ -257,7 +283,7 @@ Things verified against production (August 2026) that each cost time to discover
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test — not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each, with the command to reproduce it: 141 tests, CI green on Python
+for each, with the command to reproduce it: 153 tests, CI green on Python
 3.10–3.13, side-by-side `curl`-vs-tool measurements, and the live rejection
 contracts (`maker address not allowed…`, the RFQ HMAC error) captured without
 ever placing an order. What is deliberately *not* verified — a successful fill, a
