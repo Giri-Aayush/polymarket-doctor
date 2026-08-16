@@ -105,3 +105,23 @@ def test_unknown_check_id_suggests_the_closest_real_one(capsys):
     assert exit_code == 2
     assert "auth.key-identity" in err       # the suggestion
     assert "Traceback" not in err
+
+
+def test_onboard_json_format_emits_a_parseable_document(capsys, monkeypatch):
+    # Drive main() with a stub probe so it doesn't hit the network, then assert
+    # stdout is the JSON contract, not Rich output.
+    import json as _json
+
+    from polymarket_doctor import cli
+    from polymarket_doctor.core.runner import RunReport
+
+    def fake_run(self, ctx, only=None):
+        return RunReport()  # empty run: ok, exit 0
+
+    monkeypatch.setattr(cli.Runner, "run", fake_run)
+    code = cli.main(["onboard", "--address", "0x" + "1" * 40, "--no-rpc", "--format", "json"])
+    out = capsys.readouterr().out
+
+    doc = _json.loads(out)  # must parse
+    assert doc["schema_version"] == "1.0"
+    assert doc["exit_code"] == code == 0

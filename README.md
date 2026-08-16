@@ -48,7 +48,7 @@ thread.
 
 ---
 
-**Contents** · [Install](#install) · [Use](#use) · [The eight
+**Contents** · [Install](#install) · [Use](#use) · [Production](#running-it-in-production) · [The eight
 stages](#the-eight-stages) · [The signature-type
 thing](#the-signature-type-thing) · [What it will not
 do](#what-it-will-not-do) · [Notes from the API](#notes-from-the-api) ·
@@ -141,6 +141,65 @@ invariant that broke:
 It accepts either the full `POST /order` body or the bare order object, from a
 file (`--file`) or stdin. A `signatureType 3` order (deposit wallet, EIP-1271)
 can only be verified on chain, and the tool says so rather than guessing.
+
+## Running it in production
+
+The terminal output is for a human debugging an integration. For a market
+maker's own tooling, there are three things you'll want.
+
+**Machine-readable output.** Pass `--format json` to any command and it emits a
+versioned document instead of colored text. Every check is in there with its
+severity, summary, remedy, and any issue it maps to, plus a top-level `ok` and
+`exit_code`.
+
+```bash
+polymarket-doctor onboard --funder 0xYourWallet --format json | jq '.ok'
+```
+
+```json
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "exit_code": 0,
+  "summary": { "total": 16, "passed": 12, "warnings": 2, "failures": 0, "skipped": 2 },
+  "checks": [
+    {
+      "id": "identity.account-kind",
+      "severity": "pass",
+      "summary": "funder is a Gnosis Safe 1.3.0, use signature_type=2"
+    }
+  ]
+}
+```
+
+The `schema_version` only changes for a breaking change to the shape, so a
+parser can rely on it. Secrets never appear in the document; a test fails the
+build if they do.
+
+**Embed it, don't shell out.** The same run is available as a library call, so
+a pre-trade startup check can gate on it in-process:
+
+```python
+from polymarket_doctor import run_onboard
+
+report = run_onboard(address="0xYourEOA", funder="0xYourDepositWallet")
+if report.blocked:
+    raise SystemExit("Polymarket integration not ready: "
+                     f"{report.first_failure().finding.summary}")
+```
+
+**Resilience.** Transient failures (a dropped connection, a 502 from an edge
+node) are retried with backoff, so a blip on a health check doesn't flip a stage
+red when a second attempt would have answered. A real 4xx is never retried,
+because that's the exchange's answer, not a blip. Tune it with `--retries`
+(default 2), and POSTs are never retried so nothing can double-submit.
+
+A minimal pre-trade gate in CI:
+
+```bash
+polymarket-doctor onboard --funder "$FUNDER" --format json > health.json
+jq -e '.ok' health.json >/dev/null || { echo "integration not ready"; exit 1; }
+```
 
 ## The eight stages
 
@@ -293,7 +352,7 @@ discover:
 
 Every claim above is backed by a live API call, an on-chain read, or a pinned
 test, not by assertion. [`VERIFICATION.md`](VERIFICATION.md) records the proof
-for each one, with the command to reproduce it: 153 tests, CI green on Python
+for each one, with the command to reproduce it: 164 tests, CI green on Python
 3.10 through 3.13, side-by-side `curl`-versus-tool measurements, and the live
 rejection contracts (`maker address not allowed…`, the RFQ HMAC error) captured
 without ever placing an order. What the tool deliberately does not verify is

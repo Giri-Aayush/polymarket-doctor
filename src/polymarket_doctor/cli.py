@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import os
 import sys
 from collections.abc import Sequence
@@ -22,7 +23,8 @@ from .core.context import Context, Credentials
 from .core.runner import Runner
 from .net.chain import DEFAULT_RPC, ChainReader
 from .net.endpoints import Endpoints
-from .net.http import HttpxProbe
+from .net.http import DEFAULT_RETRIES, HttpxProbe
+from .render.json_report import build_report
 from .render.terminal import TerminalReport
 
 ENV_ADDRESS = "POLYMARKET_ADDRESS"
@@ -68,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
              "are fetched live instead of inferred",
     )
     verify.add_argument("--timeout", type=float, default=12.0)
+    verify.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="text for humans, json for pipelines",
+    )
 
     sub.add_parser("list", help="show every registered check in run order")
     return parser
@@ -121,6 +127,14 @@ def _add_transport_args(parser: argparse.ArgumentParser) -> None:
         help="skip chain reads; funder type resolves to 'unknown'",
     )
     parser.add_argument("--timeout", type=float, default=12.0, help="per-request timeout, seconds")
+    parser.add_argument(
+        "--retries", type=int, default=DEFAULT_RETRIES,
+        help=f"retries on a transient network failure (default: {DEFAULT_RETRIES})",
+    )
+    parser.add_argument(
+        "--format", choices=("text", "json"), default="text",
+        help="text for humans, json for pipelines and monitoring",
+    )
 
 
 def _credentials_from(args: argparse.Namespace) -> Credentials | None:
@@ -141,7 +155,6 @@ def _credentials_from(args: argparse.Namespace) -> Credentials | None:
 
 def _verify_order(args: argparse.Namespace, console: Console) -> int:
     """Validate a signed order from a file or stdin. Read-only throughout."""
-    import json
     from decimal import Decimal
 
     from .core.check import Severity
@@ -173,6 +186,28 @@ def _verify_order(args: argparse.Namespace, console: Console) -> int:
                 neg_risk = bool(nr.body["neg_risk"])
 
     results = verify_order(order, neg_risk=neg_risk, tick_size=tick)
+    failed = any(r.finding.severity is Severity.FAIL for r in results)
+
+    if args.format == "json":
+        print(json.dumps({
+            "schema_version": "1.0",
+            "tool": "polymarket-doctor",
+            "command": "verify-order",
+            "exchange": "neg-risk" if neg_risk else "standard",
+            "ok": not failed,
+            "exit_code": 1 if failed else 0,
+            "checks": [
+                {
+                    "name": r.name,
+                    "severity": r.finding.severity.value,
+                    "summary": r.finding.summary,
+                    **({"detail": r.finding.detail} if r.finding.detail else {}),
+                    **({"remedy": r.finding.remedy} if r.finding.remedy else {}),
+                }
+                for r in results
+            ],
+        }, indent=2))
+        return 1 if failed else 0
 
     console.print()
     console.print(Text("Order verification", style="bold"),
@@ -193,11 +228,10 @@ def _verify_order(args: argparse.Namespace, console: Console) -> int:
                 console.print(Text(f"      {label}{extra}", style="bright_black"))
     console.print()
 
-    failed = any(r.finding.severity is Severity.FAIL for r in results)
     console.print(Text(" This order would be rejected." if failed
                        else " No blocking problems found in this order.",
                        style="bold red" if failed else "bold green"))
-    console.print(Text(" Structural and signature checks only — nothing was sent.",
+    console.print(Text(" Structural and signature checks only, nothing was sent.",
                        style="bright_black"))
     console.print()
     return 1 if failed else 0
@@ -230,7 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"known checks: {', '.join(known)}", file=sys.stderr)
             return 2
 
-    with HttpxProbe(timeout=args.timeout) as probe:
+    with HttpxProbe(timeout=args.timeout, retries=args.retries) as probe:
         ctx = Context(
             endpoints=endpoints,
             probe=probe,
@@ -243,7 +277,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         only = [args.check_id] if args.command == "check" else None
         report = Runner(registry).run(ctx, only=only)
 
-    TerminalReport(console).render(report, host=endpoints.clob)
+    if args.format == "json":
+        # print, not console.print: Rich would wrap and colorize, and a
+        # pipeline wants the raw document on stdout.
+        print(json.dumps(build_report(report, host=endpoints.clob), indent=2))
+    else:
+        TerminalReport(console).render(report, host=endpoints.clob)
     return report.exit_code()
 
 
